@@ -108,6 +108,80 @@ app.get('/api/chat', async (c) => {
 	}
 });
 
+app.post('/mrt', async (c) => {
+	try {
+		const body = await c.req.json();
+		const { prompt, data } = body;
+		console.log('prompt', prompt);
+		console.log('data', data);
+		const google = createGoogleGenerativeAI({
+			apiKey: '',
+		});
+
+		const systemPrompt = `
+		You are an AI assistant called Superpumped that processes table data for a Material React Table (MRT) component.
+		Given the table data and a user prompt, interpret the prompt and return a JSON object representing the updated MRT configuration.
+		The configuration must include:
+		- "data": the updated table data (array of objects),
+		- "columns": the updated column definitions (array of {accessorKey, header}, optionally with other MRT props like enableColumnOrdering),
+		- Optionally, other MRT props like "initialState" for sorting/filtering.
+		Be concise and accurate. If the prompt is unclear, return an error message in the JSON.
+		Example input: Data: [{"firstName": "John", "lastName": "Doe"}], Prompt: "remove column lastName"
+		Example output: {"data": [{"firstName": "John"}], "columns": [{"accessorKey": "firstName", "header": "First Name"}]}
+		`;
+
+		const userMessage = `
+			Table data: ${JSON.stringify(data)}
+			User prompt: "${prompt}"
+		`;
+
+		const initialMessages = [{ role: 'user', content: systemPrompt }];
+		const userPromptMessage = { role: 'user', content: userMessage };
+
+		// Call Gemini API
+		const response = await generateText({
+			model: google('gemini-1.5-flash'),
+			messages: [...initialMessages, userPromptMessage],
+		});
+
+		// let resultText = '';
+		// for await (const chunk of response) {
+		// 	resultText += chunk;
+		// }
+		const resultText = response.text || response.data; // Adjust based on your API response structure
+
+		// Clean up the response to remove ```json and ```
+		const cleanedText = resultText
+			.replace(/```json/g, '') // Remove opening ```json
+			.replace(/```/g, '') // Remove closing ```
+			.trim(); // Remove leading/trailing whitespace
+
+		console.log('Cleaned text:', cleanedText);
+		let updatedConfig;
+		// return c.text('Lets see');
+		// Parse the response as JSON
+		try {
+			updatedConfig = JSON.parse(cleanedText);
+		} catch (parseError) {
+			console.error('Failed to parse Gemini response:', parseError);
+			return c.status(500).json({ error: 'Invalid response format from AI' });
+		}
+		console.log('update config, ', updatedConfig);
+
+		// Validate the response structure
+		if (!updatedConfig.data || !updatedConfig.columns) {
+			return c.status(400).json({ error: 'Invalid configuration: missing data or columns' });
+		}
+
+		// Send the updated configuration back to the frontend
+		return c.json({ updatedConfig });
+	} catch (error) {
+		// Handle any errors and send a response back to the client
+		console.error('Error:', error);
+		return res.status(500).json({ error: 'Failed to process the request' });
+	}
+});
+
 // app.post('/notes', async (c) => {
 // 	const { text } = await c.req.json();
 // 	console.log('text', text);
