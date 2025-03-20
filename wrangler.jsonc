@@ -27,7 +27,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "database",
+      "database_name": "database1",
       "database_id": "da4538d5-9f27-4387-bf52-c7c7c9581571"
     }
   ],

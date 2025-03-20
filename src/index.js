@@ -247,7 +247,6 @@ app.post('/mrt-chat', async (c) => {
 		- The data is formatted as: "header1, header2, header3\nvalue1, value2, value3\n..."
 		- Analyze the data to answer queries about highest/lowest values, averages, counts, filtering, or other aggregations.
 		- Respond in a conversational tone, as if speaking to the user directly.
-		- If the prompt is unclear or the query cannot be answered with the given data, respond with: "I couldn't understand your query or the data doesn't support this request. Please try again."
 		- Do not modify the data or table configuration; only provide a textual response.
 		- If a column name in the prompt doesn't match the data, try to infer the closest match (e.g., "sales" might be "Sales").
 		- Handle numerical comparisons (e.g., "above", "below") and aggregations (e.g., "average", "total") accurately.
@@ -272,12 +271,10 @@ app.post('/mrt-chat', async (c) => {
   
 		Now, analyze the following data and answer the user's prompt.
 	  `;
-
+		console.log("formattedData", formattedData)
 		const content = `
 		The following table data is provided for analysis:
-  
-		${formattedData}
-  
+		${formattedData}  
 		Now, please answer the following question:
 	  `;
 
@@ -299,6 +296,207 @@ app.post('/mrt-chat', async (c) => {
 	}
 });
 
+app.post('/chart-config-2', async (c) => {
+	try {
+		const body = await c.req.json();
+		console.log('body', body);
+
+		const { data, prompt, config } = body;
+
+		// Validate input
+		if (!prompt || !data || !Array.isArray(data)) {
+			return c.text('Prompt and data are required, and data must be an array', 400);
+		}
+
+		// Format data into CSV-like structure
+		let formattedData = '';
+		if (data.length > 0) {
+			const headers = Object.keys(data[0]);
+			formattedData = headers.join(', ') + '\n' + data.map(row => headers.map(header => row[header] ?? '').join(', ')).join('\n');
+		} else {
+			formattedData = 'No data available.';
+		}
+
+		// System instructions for chart configuration update
+		const systemPrompt = `You are an AI assistant that updates ApexCharts configurations based on user requests...`;
+		const content = `The following table data is provided:\n\n${formattedData}\n\nNow, update the chart configuration based on this prompt:\n${prompt}`;
+
+		const response = await generateText({
+			model: google('gemini-1.5-flash'),
+			messages: [{ role: 'user', content: systemPrompt }, { role: 'user', content: content }],
+		});
+
+		const cleanedText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
+		let updatedChartConfig;
+		try {
+			updatedChartConfig = JSON.parse(cleanedText);
+		} catch (parseError) {
+			console.error('Failed to parse chart config:', parseError);
+			return c.text('Invalid chart configuration from AI', 500);
+		}
+
+		if (!updatedChartConfig.options || !updatedChartConfig.series) {
+			return c.text('Invalid chart configuration: missing options or series', 400);
+		}
+
+		return c.json({ updatedChartConfig });
+	} catch (error) {
+		console.error('Error in /mrt-config:', error);
+		return c.text('Failed to process the request', 500);
+	}
+});
+app.post('/chart-chat', async (c) => {
+	try {
+		const body = await c.req.json();
+		console.log('body', body);
+
+		const { data, prompt } = body;
+
+		// Validate input
+		if (!prompt || !data || !Array.isArray(data)) {
+			return c.text('Prompt and data are required, and data must be an array', 400);
+		}
+
+		// Format data into CSV-like structure
+		let formattedData = '';
+		if (data.length > 0) {
+			const headers = Object.keys(data[0]);
+			formattedData = headers.join(', ') + '\n' + data.map(row => headers.map(header => row[header] ?? '').join(', ')).join('\n');
+		} else {
+			formattedData = 'No data available.';
+		}
+
+		// System instructions for chat mode
+		const systemPrompt = `You are an AI assistant that answers questions based on structured table data...`;
+		const content = `The following table data is provided:\n\n${formattedData}\n\nNow, answer this question:\n${prompt}`;
+
+		// Stream AI response
+		const response = await streamText({
+			model: google('gemini-1.5-flash'),
+			messages: [{ role: 'user', content: systemPrompt }, { role: 'user', content: content }],
+		});
+
+		return response.toTextStreamResponse();
+	} catch (error) {
+		console.error('Error in /mrt-chat:', error);
+		return c.text('Failed to process the request', 500);
+	}
+});
+
+app.post('/chart-config', async (c) => {
+	try {
+		const body = await c.req.json();
+		console.log('body', body);
+
+		const { data, prompt, config } = body;
+
+		// Validate input
+		if (!prompt || !data || !Array.isArray(data)) {
+			return c.text('Prompt and data are required, and data must be an array', 400);
+		}
+
+		// Format the data as a CSV-like string for better readability by the model
+		let formattedData = '';
+		if (Array.isArray(data) && data.length > 0) {
+			const headers = Object.keys(data[0]);
+			formattedData = headers.join(', ') + '\n';
+			formattedData += data
+				.map((row) => headers.map((header) => row[header] ?? '').join(', '))
+				.join('\n');
+		} else {
+			formattedData = 'No data available.';
+		}
+
+		// Determine the mode based on whether config is provided
+		const isConfigMode = !!config;
+
+		if (isConfigMode) {
+			// Config Mode: Update the chart configuration (non-streaming)
+			const systemPrompt = `
+		  You are an AI assistant called Superpumped that generates and updates chart configurations for ApexCharts based on table data and user prompts.
+		  The table data is provided in a CSV-like format, where the first row contains the column headers, and each subsequent row represents a data entry.
+		  The current chart configuration is provided in JSON format.
+		  Your task is to interpret the user's prompt and return a JSON object representing the updated ApexCharts configuration, including:
+		  - "options": The chart options (e.g., chart type, xaxis, yaxis, labels).
+		  - "series": The data series for the chart (e.g., [{ name: "Sales", data: [50000, 75000] }]).
+		  
+		  Key Instructions:
+		  - The data is formatted as: "header1, header2, header3\nvalue1, value2, value3\n..."
+		  - The current chart config is: ${JSON.stringify(config)}.
+		  - Determine the appropriate chart type based on the prompt (e.g., "bar chart" → bar, "pie chart" → pie, "line chart" → line).
+		  - If the chart type is not specified, keep the current chart type or default to a bar chart for numerical data grouped by a categorical column.
+		  - Aggregate data as needed (e.g., sum, average, count) based on the prompt.
+		  - For bar charts, use a categorical column (e.g., department) for the x-axis and a numerical column (e.g., sales) for the y-axis.
+		  - For pie charts, use a categorical column for labels and a numerical column for values.
+		  - For line charts, ensure there’s a time-based or sequential column for the x-axis.
+		  - If the prompt is unclear or the data doesn’t support the requested chart, return the current chart config with a message in the response.
+		  - Preserve existing chart options unless the prompt explicitly changes them.
+		  - Return a valid ApexCharts configuration in JSON format.
+  
+		  Examples:
+		  1. Data: "firstName, lastName, sales, department\nJohn, Doe, 50000, Sales\nJane, Smith, 75000, Sales\nBob, Johnson, 30000, Marketing"
+			 Current Config: { "options": { "chart": { "type": "bar" }, "xaxis": { "categories": ["Sales", "Marketing"] }, "yaxis": { "title": { "text": "Sales" } } }, "series": [{ "name": "Sales", "data": [125000, 30000] }] }
+			 Prompt: "change to a pie chart"
+			 Response: {
+			   "options": { "chart": { "type": "pie" }, "labels": ["Sales", "Marketing"] },
+			   "series": [125000, 30000]
+			 }
+		  2. Data: "firstName, lastName, sales, region\nJohn, Doe, 50000, North\nJane, Smith, 75000, South\nBob, Johnson, 30000, North"
+			 Current Config: { "options": { "chart": { "type": "pie" }, "labels": ["North", "South"] }, "series": [80000, 75000] }
+			 Prompt: "show sales by region as a bar chart"
+			 Response: {
+			   "options": { "chart": { "type": "bar" }, "xaxis": { "categories": ["North", "South"] }, "yaxis": { "title": { "text": "Sales" } } },
+			   "series": [{ "name": "Sales", "data": [80000, 75000] }]
+			 }
+  
+		  Now, analyze the following data and update the chart configuration based on the user's prompt.
+		`;
+
+			const content = `
+		  The following table data is provided for analysis:
+  
+		  ${formattedData}
+  
+		  Now, please update the ApexCharts configuration for the following prompt:
+		`;
+
+			const initialMessages = [{ role: 'user', content: systemPrompt }];
+			const userMessage = { role: 'user', content: `${content}\n${prompt}` };
+
+			// Use generateText (non-streaming) for Config Mode
+			const response = await generateText({
+				model: google('gemini-1.5-flash'),
+				messages: [...initialMessages, userMessage],
+			});
+
+			const resultText = response.text || response.data; // Adjust based on your API response structure
+			console.log('Raw response:', resultText);
+
+			const cleanedText = resultText
+				.replace(/```json/g, '')
+				.replace(/```/g, '')
+				.trim();
+
+			let updatedChartConfig;
+			try {
+				updatedChartConfig = JSON.parse(cleanedText);
+			} catch (parseError) {
+				console.error('Failed to parse chart config:', parseError);
+				return c.text('Invalid chart configuration from AI', 500);
+			}
+
+			if (!updatedChartConfig.options || !updatedChartConfig.series) {
+				return c.text('Invalid chart configuration: missing options or series', 400);
+			}
+
+			return c.json({ updatedChartConfig });
+		} else {
+		}
+	} catch (error) {
+		console.error('Error in /mrt-chart:', error);
+		return c.text('Failed to process the request', 500);
+	}
+});
 // app.post('/mrt-chat', async (c) => {
 // 	try {
 // 		const body = await c.req.json();
