@@ -271,7 +271,7 @@ app.post('/mrt-chat', async (c) => {
   
 		Now, analyze the following data and answer the user's prompt.
 	  `;
-		console.log("formattedData", formattedData)
+		console.log('formattedData', formattedData);
 		const content = `
 		The following table data is provided for analysis:
 		${formattedData}  
@@ -312,7 +312,7 @@ app.post('/chart-config-2', async (c) => {
 		let formattedData = '';
 		if (data.length > 0) {
 			const headers = Object.keys(data[0]);
-			formattedData = headers.join(', ') + '\n' + data.map(row => headers.map(header => row[header] ?? '').join(', ')).join('\n');
+			formattedData = headers.join(', ') + '\n' + data.map((row) => headers.map((header) => row[header] ?? '').join(', ')).join('\n');
 		} else {
 			formattedData = 'No data available.';
 		}
@@ -323,10 +323,16 @@ app.post('/chart-config-2', async (c) => {
 
 		const response = await generateText({
 			model: google('gemini-1.5-flash'),
-			messages: [{ role: 'user', content: systemPrompt }, { role: 'user', content: content }],
+			messages: [
+				{ role: 'user', content: systemPrompt },
+				{ role: 'user', content: content },
+			],
 		});
 
-		const cleanedText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
+		const cleanedText = response.text
+			.replace(/```json/g, '')
+			.replace(/```/g, '')
+			.trim();
 		let updatedChartConfig;
 		try {
 			updatedChartConfig = JSON.parse(cleanedText);
@@ -361,7 +367,7 @@ app.post('/chart-chat', async (c) => {
 		let formattedData = '';
 		if (data.length > 0) {
 			const headers = Object.keys(data[0]);
-			formattedData = headers.join(', ') + '\n' + data.map(row => headers.map(header => row[header] ?? '').join(', ')).join('\n');
+			formattedData = headers.join(', ') + '\n' + data.map((row) => headers.map((header) => row[header] ?? '').join(', ')).join('\n');
 		} else {
 			formattedData = 'No data available.';
 		}
@@ -373,7 +379,10 @@ app.post('/chart-chat', async (c) => {
 		// Stream AI response
 		const response = await streamText({
 			model: google('gemini-1.5-flash'),
-			messages: [{ role: 'user', content: systemPrompt }, { role: 'user', content: content }],
+			messages: [
+				{ role: 'user', content: systemPrompt },
+				{ role: 'user', content: content },
+			],
 		});
 
 		return response.toTextStreamResponse();
@@ -400,9 +409,7 @@ app.post('/chart-config', async (c) => {
 		if (Array.isArray(data) && data.length > 0) {
 			const headers = Object.keys(data[0]);
 			formattedData = headers.join(', ') + '\n';
-			formattedData += data
-				.map((row) => headers.map((header) => row[header] ?? '').join(', '))
-				.join('\n');
+			formattedData += data.map((row) => headers.map((header) => row[header] ?? '').join(', ')).join('\n');
 		} else {
 			formattedData = 'No data available.';
 		}
@@ -497,6 +504,261 @@ app.post('/chart-config', async (c) => {
 		return c.text('Failed to process the request', 500);
 	}
 });
+
+app.post('/generate-dashboard', async (c) => {
+	const sampleData = {
+		salesData: {
+			monthly: [
+				{ month: 'Jan', revenue: 12500, cost: 7000, profit: 5500 },
+				{ month: 'Feb', revenue: 14200, cost: 7800, profit: 6400 },
+				{ month: 'Mar', revenue: 15800, cost: 8200, profit: 7600 },
+				{ month: 'Apr', revenue: 16900, cost: 8800, profit: 8100 },
+				{ month: 'May', revenue: 19200, cost: 9500, profit: 9700 },
+				{ month: 'Jun', revenue: 21500, cost: 10200, profit: 11300 },
+			],
+			products: [
+				{ id: 1, name: 'Product A', sales: 1245, revenue: 62250 },
+				{ id: 2, name: 'Product B', sales: 968, revenue: 48400 },
+				{ id: 3, name: 'Product C', sales: 1492, revenue: 74600 },
+				{ id: 4, name: 'Product D', sales: 856, revenue: 42800 },
+				{ id: 5, name: 'Product E', sales: 1057, revenue: 52850 },
+			],
+			regions: [
+				{ name: 'North', revenue: 45200 },
+				{ name: 'South', revenue: 38900 },
+				{ name: 'East', revenue: 42700 },
+				{ name: 'West', revenue: 52600 },
+				{ name: 'Central', revenue: 35800 },
+			],
+			kpis: {
+				totalRevenue: 215200,
+				totalProfit: 98600,
+				averageOrderValue: 124.5,
+				customerCount: 1728,
+				revenueGrowth: 15.8,
+				profitMargin: 45.8,
+			},
+		},
+
+		userActivityData: {
+			daily: [
+				{ date: '2023-06-01', activeUsers: 2540, newUsers: 120, sessions: 4250 },
+				{ date: '2023-06-02', activeUsers: 2620, newUsers: 145, sessions: 4380 },
+				{ date: '2023-06-03', activeUsers: 2480, newUsers: 115, sessions: 4150 },
+				{ date: '2023-06-04', activeUsers: 2390, newUsers: 98, sessions: 3980 },
+				{ date: '2023-06-05', activeUsers: 2710, newUsers: 152, sessions: 4520 },
+				{ date: '2023-06-06', activeUsers: 2850, newUsers: 168, sessions: 4760 },
+				{ date: '2023-06-07', activeUsers: 2920, newUsers: 175, sessions: 4870 },
+			],
+			demographics: [
+				{ age: '18-24', percentage: 22 },
+				{ age: '25-34', percentage: 38 },
+				{ age: '35-44', percentage: 25 },
+				{ age: '45-54', percentage: 10 },
+				{ age: '55+', percentage: 5 },
+			],
+			devices: [
+				{ device: 'Mobile', sessions: 12580 },
+				{ device: 'Desktop', sessions: 10340 },
+				{ device: 'Tablet', sessions: 2480 },
+			],
+			kpis: {
+				totalUsers: 8450,
+				averageSessionDuration: '3m 24s',
+				bounceRate: 32.5,
+				conversionRate: 4.8,
+				retentionRate: 68.2,
+			},
+		},
+	};
+
+	try {
+		const body = await c.req.json();
+		console.log('body', body);
+
+		const { prompt } = body;
+
+		// Validate input
+		// if (!prompt || !data || !Array.isArray(data)) {
+		// 	return c.text('Prompt and data are required', 400);
+		// }
+
+		// Format the data as a CSV-like string for better readability by the model
+		// let formattedData = '';
+		// if (Array.isArray(data) && data.length > 0) {
+		// 	const headers = Object.keys(data[0]);
+		// 	formattedData = headers.join(', ') + '\n';
+		// 	formattedData += data.map((row) => headers.map((header) => row[header] ?? '').join(', ')).join('\n');
+		// } else {
+		// 	formattedData = 'No data available.';
+		// }
+
+		// Determine the mode based on whether config is provided
+		// const isConfigMode = !!config;
+
+		// Config Mode: Update the chart configuration (non-streaming)
+		const llmPrompt = `
+			You are a dashboard design expert. Based on the following prompt and data, create a JSON configuration for a dynamic dashboard with multiple components.
+			
+			User Prompt: "${prompt}"
+			
+			Available Data: ${JSON.stringify(sampleData, null, 2)}
+			
+			Respond with ONLY a valid JSON configuration for a dashboard with multiple components. The configuration should follow this format:
+			
+			{
+			"title": "Dashboard Title",
+			"description": "Dashboard description",
+			"layout": "grid" or "tabbed",
+			
+			// For grid layout
+			"components": [
+				{
+				"type": "chart",
+				"gridSize": 6, // Size in MUI grid (1-12, where 12 is full width)
+				"chartConfig": {
+					"type": "bar|line|pie|area|radar|scatter|heatmap",
+					"title": "Chart Title",
+					"description": "Brief description",
+					"height": 350,
+					"data": {
+					"categories": ["Category1", "Category2", ...],
+					"series": [
+						{
+						"name": "Series Name",
+						"data": [value1, value2, ...]
+						}
+					]
+					},
+					"xAxisTitle": "X-Axis Title",
+					"yAxisTitle": "Y-Axis Title",
+					"options": {}
+				}
+				},
+				{
+				"type": "table",
+				"gridSize": 6,
+				"tableConfig": {
+					"title": "Table Title",
+					"description": "Brief description",
+					"dense": true,
+					"columns": [
+					{
+						"header": "Column Name",
+						"field": "fieldName",
+						"align": "left|right|center"
+					}
+					],
+					"data": [
+					{
+						"fieldName": "value",
+						...
+					}
+					]
+				}
+				},
+				{
+				"type": "stat",
+				"gridSize": 3,
+				"statConfig": {
+					"title": "Stat Title",
+					"value": "Value",
+					"change": 12.5, // Percentage change
+					"period": "vs last period"
+				}
+				},
+				{
+				"type": "list",
+				"gridSize": 6,
+				"listConfig": {
+					"title": "List Title",
+					"description": "Brief description",
+					"items": [
+					{
+						"primary": "Primary Text",
+						"secondary": "Secondary Text",
+						"avatar": "avatar_url",
+						"value": "Value",
+						"valueColor": "success.main",
+						"highlighted": true
+					}
+					]
+				}
+				},
+				{
+				"type": "filter",
+				"gridSize": 12,
+				"filterConfig": {
+					"title": "Filter Title",
+					"type": "dropdown|toggle|tabs",
+					"label": "Filter Label",
+					"defaultValue": "value",
+					"options": [
+					{
+						"label": "Option Label",
+						"value": "option_value"
+					}
+					]
+				}
+				},
+				{
+				"type": "text",
+				"gridSize": 12,
+				"textConfig": {
+					"title": "Text Title",
+					"content": "Text content goes here",
+					"variant": "body1|h5|subtitle1"
+				}
+				}
+			],
+			
+			// For tabbed layout
+			"tabs": [
+				{
+				"label": "Tab Label",
+				"components": [
+					// Same component objects as above
+				]
+				}
+			]
+			}
+			
+			Analyze the data and user's intent to create the most appropriate dashboard. Include a mix of different component types based on the prompt and available data.
+		`;
+
+		const initialMessages = [{ role: 'user', content: llmPrompt }];
+		const userMessage = { role: 'user', content: `${prompt}` };
+
+		// Use generateText (non-streaming) for Config Mode
+		const response = await generateText({
+			model: google('gemini-1.5-flash'),
+			messages: [...initialMessages, userMessage],
+		});
+
+		const resultText = response.text || response.data; // Adjust based on your API response structure
+		console.log('Raw response:', resultText);
+		let dashboardConfig = null;
+		// Extract JSON from the response text
+		const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+		if (jsonMatch) {
+			dashboardConfig = JSON.parse(jsonMatch[0]);
+		} else {
+			// Fallback if we can't extract JSON directly
+			dashboardConfig = JSON.parse(resultText);
+		}
+
+		// const cleanedText = resultText
+		// 	.replace(/```json/g, '')
+		// 	.replace(/```/g, '')
+		// 	.trim();
+
+		return c.json({ success: true, data: sampleData, dashboardConfig, prompt });
+	} catch (error) {
+		console.error('Error in /mrt-chart:', error);
+		return c.text('Failed to process the request', 500);
+	}
+});
+
 // app.post('/mrt-chat', async (c) => {
 // 	try {
 // 		const body = await c.req.json();
