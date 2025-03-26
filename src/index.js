@@ -11,6 +11,9 @@ app.use(
 		origin: '*', // Allow all origins
 	})
 );
+const google = createGoogleGenerativeAI({
+	apiKey: 'AIzaSyBINgV2AnsZjTEyb8lExjBNWC5Ju0qlLKs',
+});
 
 app.get('/', async (c) => {
 	const question = c.req.query('text') || 'What is the square root of 9?';
@@ -82,9 +85,7 @@ app.get('/api/chat', async (c) => {
 	try {
 		const query = c.req.query('query');
 		console.log('query', query);
-		const google = createGoogleGenerativeAI({
-			apiKey: '',
-		});
+
 		const systemPrompt = `You are an AI assistant called superpumped that acts as a "Second Brain" by answering questions based on provided context. Your goal is to directly address the question concisely and to the point, without excessive elaboration`;
 
 		const initialMessages = [
@@ -106,10 +107,6 @@ app.get('/api/chat', async (c) => {
 		console.error('Error:', error);
 		return c.text('Failed to process the request', 500);
 	}
-});
-
-const google = createGoogleGenerativeAI({
-	apiKey: '',
 });
 
 app.post('/mrt', async (c) => {
@@ -504,72 +501,225 @@ app.post('/chart-config', async (c) => {
 		return c.text('Failed to process the request', 500);
 	}
 });
+app.post('/process-file', async (c) => {
+	const formData = await c.req.formData();
+	const file = formData.get('file');
+	const prompt = formData.get('prompt');
+
+	// Validate inputs
+	if (!file || !prompt) {
+		return c.json({ error: 'Missing file or prompt' }, 400);
+	}
+	console.log('file', file);
+	console.log('prompt', prompt);
+	try {
+		// Read file based on type
+		const arrayBuffer = await file.arrayBuffer();
+		let rawData;
+
+		if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+			// Excel (.xlsx)
+			const workbook = read(arrayBuffer, { type: 'array' });
+			const sheetName = workbook.SheetNames[0];
+			const worksheet = workbook.Sheets[sheetName];
+			rawData = utils.sheet_to_json(worksheet);
+		} else if (file.type === 'text/csv') {
+			// CSV
+			const text = new TextDecoder().decode(arrayBuffer);
+			rawData = parseCSV(text); // Custom CSV parsing
+		} else {
+			return c.json({ error: 'Unsupported file type' }, 400);
+		}
+
+		// Process data with AI
+		const processedData = await processDataWithAI(rawData, prompt);
+		return c.json({
+			data: processedData,
+			// dashboardConfig: generateDashboardConfig(processedData),
+		});
+	} catch (error) {
+		return c.json({ error: `Failed to process file: ${error.message}` }, 500);
+	}
+});
+
+function parseCSV(text) {
+	const lines = text.split('\n').filter((line) => line.trim() !== '');
+	const headers = lines[0].split(',').map((h) => h.trim());
+	const data = lines.slice(1).map((line) => {
+		const values = line.split(',').map((v) => v.trim());
+		return headers.reduce((obj, header, i) => {
+			obj[header] = isNaN(values[i]) ? values[i] : Number(values[i]);
+			return obj;
+		}, {});
+	});
+	return data;
+}
+
+async function processDataWithAI(rawData, prompt) {
+	// const apiKey = 'YOUR_GOOGLE_AI_API_KEY'; // Store in environment variables
+	// const apiUrl = 'https://api.google-ai-endpoint.com/v1/models/gemini:generate'; // Adjust URL
+
+	const aiPrompt = `
+	  Given the following dataset: 
+	  ${JSON.stringify(rawData, null, 2)}
+	  Perform the following operations based on this user prompt: "${prompt}"
+	  Return the transformed data in JSON format.
+	`;
+
+	const initialMessages = [{ role: 'user', content: aiPrompt }];
+	// const userMessage = { role: 'user', content: `${prompt}` };
+
+	// Use generateText (non-streaming) for Config Mode
+	const response = await generateText({
+		model: google('gemini-1.5-flash'),
+		messages: [...initialMessages],
+	});
+
+	const resultText = response.text || response.data; // Adjust based on your API response structure
+	console.log('Raw response:', resultText);
+
+	// if (!response.ok) {
+	// 	throw new Error('AI processing failed');
+	// }
+
+	const cleanedText = resultText
+		.replace(/```json/g, '') // Remove opening ```json
+		.replace(/```/g, '') // Remove closing ```
+		.trim(); // Remove leading/trailing whitespace
+
+	console.log('cleanedText', cleanedText);
+	return JSON.parse(cleanedText);
+	// Try to extract valid JSON using a more specific regular expression
+	// const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+
+	// if (!jsonMatch) {
+	// 	throw new Error('No valid JSON found in the response');
+	// }
+
+	// const parsedJson = JSON.parse(jsonMatch[0]); // Parse the extracted JSON string
+
+	// console.log('Parsed JSON:', parsedJson);
+
+	// return parsedJson;
+	// const result = await jsonMatch.json();
+	// return JSON.parse(result.generatedText); // Assuming AI returns JSON string
+}
 
 app.post('/generate-dashboard', async (c) => {
 	const sampleData = {
-		salesData: {
-			monthly: [
-				{ month: 'Jan', revenue: 12500, cost: 7000, profit: 5500 },
-				{ month: 'Feb', revenue: 14200, cost: 7800, profit: 6400 },
-				{ month: 'Mar', revenue: 15800, cost: 8200, profit: 7600 },
-				{ month: 'Apr', revenue: 16900, cost: 8800, profit: 8100 },
-				{ month: 'May', revenue: 19200, cost: 9500, profit: 9700 },
-				{ month: 'Jun', revenue: 21500, cost: 10200, profit: 11300 },
-			],
-			products: [
-				{ id: 1, name: 'Product A', sales: 1245, revenue: 62250 },
-				{ id: 2, name: 'Product B', sales: 968, revenue: 48400 },
-				{ id: 3, name: 'Product C', sales: 1492, revenue: 74600 },
-				{ id: 4, name: 'Product D', sales: 856, revenue: 42800 },
-				{ id: 5, name: 'Product E', sales: 1057, revenue: 52850 },
-			],
-			regions: [
-				{ name: 'North', revenue: 45200 },
-				{ name: 'South', revenue: 38900 },
-				{ name: 'East', revenue: 42700 },
-				{ name: 'West', revenue: 52600 },
-				{ name: 'Central', revenue: 35800 },
-			],
-			kpis: {
-				totalRevenue: 215200,
-				totalProfit: 98600,
-				averageOrderValue: 124.5,
-				customerCount: 1728,
-				revenueGrowth: 15.8,
-				profitMargin: 45.8,
+		data: [
+			{
+				Line: 'Line 1 (Auto- Uni)',
+				'SKU Information': 'RSWNSW2UTPCVL',
+				'Final FG': 4718,
+				'Sensor Final FG': 4306,
+				'Opening Hours (min)': 915,
+				'Weighted Line Rating': 7624.58,
+				'Weighted Line Rating (Constraint)': 7624.58,
+				'Machine Losses (min)': 0,
+				'Utility Losses (min)': 0,
+				'Major Stoppages': 56,
+				'Minor Stoppages': 342,
+				'Unbooked Major Downtime': 0,
+				'Unbooked Minor Downtime': 6782,
+				'Planned Downtime (min)': 0,
+				'Changeover Loss (min)': 0,
+				'DG/WG Unavailability (min)': 0,
+				'Quality Loss / Checks (min)': 93,
+				'Cleaning (min)': 0,
+				'Non Operational time (min)': 0,
+				'Line Start Up and Shut Down Loss (min)': 5,
+				'Common/Other Losses (min)': 1,
+				'Performance Losses (min)': 169,
+				'Machine Unavailability Losses (min)': 0,
+				'Operating Hours (min)': 915,
+				'Machine Hours (min)': 613,
+				'Factory Efficiency': 56.48,
+				'Operating Efficiency': 56.48,
+				'Rated Performance Rate': 92.4,
+				'Sensor Rated Performance Rate': 84.1,
+				'Constraint Performance Rate': 84.1,
+				'Machine Reliability': 91.72,
+				Availability: 67,
+				OEE: 61.9,
+				'Sensor OEE': 56.35,
+				'Constraint OEE': 56.35,
 			},
-		},
-
-		userActivityData: {
-			daily: [
-				{ date: '2023-06-01', activeUsers: 2540, newUsers: 120, sessions: 4250 },
-				{ date: '2023-06-02', activeUsers: 2620, newUsers: 145, sessions: 4380 },
-				{ date: '2023-06-03', activeUsers: 2480, newUsers: 115, sessions: 4150 },
-				{ date: '2023-06-04', activeUsers: 2390, newUsers: 98, sessions: 3980 },
-				{ date: '2023-06-05', activeUsers: 2710, newUsers: 152, sessions: 4520 },
-				{ date: '2023-06-06', activeUsers: 2850, newUsers: 168, sessions: 4760 },
-				{ date: '2023-06-07', activeUsers: 2920, newUsers: 175, sessions: 4870 },
-			],
-			demographics: [
-				{ age: '18-24', percentage: 22 },
-				{ age: '25-34', percentage: 38 },
-				{ age: '35-44', percentage: 25 },
-				{ age: '45-54', percentage: 10 },
-				{ age: '55+', percentage: 5 },
-			],
-			devices: [
-				{ device: 'Mobile', sessions: 12580 },
-				{ device: 'Desktop', sessions: 10340 },
-				{ device: 'Tablet', sessions: 2480 },
-			],
-			kpis: {
-				totalUsers: 8450,
-				averageSessionDuration: '3m 24s',
-				bounceRate: 32.5,
-				conversionRate: 4.8,
-				retentionRate: 68.2,
+			{
+				Line: 'Line 1 (Auto- Uni)',
+				'SKU Information': 'RSWNSW2UTPCVL-RSWNSW2UTPCVL',
+				'Final FG': 2104,
+				'Sensor Final FG': 2104,
+				'Opening Hours (min)': 709,
+				'Weighted Line Rating': 5187.22,
+				'Weighted Line Rating (Constraint)': 5187.22,
+				'Machine Losses (min)': 0,
+				'Utility Losses (min)': 0,
+				'Major Stoppages': 72,
+				'Minor Stoppages': 155,
+				'Unbooked Major Downtime': 5436,
+				'Unbooked Minor Downtime': 3273,
+				'Planned Downtime (min)': 0,
+				'Changeover Loss (min)': 5,
+				'DG/WG Unavailability (min)': 0,
+				'Quality Loss / Checks (min)': 110,
+				'Cleaning (min)': 0,
+				'Non Operational time (min)': 0,
+				'Line Start Up and Shut Down Loss (min)': 0,
+				'Common/Other Losses (min)': 10,
+				'Performance Losses (min)': 0,
+				'Machine Unavailability Losses (min)': 0,
+				'Operating Hours (min)': 709,
+				'Machine Hours (min)': 377,
+				'Factory Efficiency': 40.56,
+				'Operating Efficiency': 40.56,
+				'Rated Performance Rate': 67,
+				'Sensor Rated Performance Rate': 67,
+				'Constraint Performance Rate': 67,
+				'Machine Reliability': 97.86,
+				Availability: 53.2,
+				OEE: 35.62,
+				'Sensor OEE': 35.62,
+				'Constraint OEE': 35.62,
 			},
-		},
+			{
+				Line: 'Line 2 (Auto- Uni)',
+				'SKU Information': 'IBWNDC1UTPCVL',
+				'Final FG': 5483,
+				'Sensor Final FG': 5007,
+				'Opening Hours (min)': 915,
+				'Weighted Line Rating': 4765.02,
+				'Weighted Line Rating (Constraint)': 4765.02,
+				'Machine Losses (min)': 0,
+				'Utility Losses (min)': 0,
+				'Major Stoppages': 41,
+				'Minor Stoppages': 337,
+				'Unbooked Major Downtime': 0,
+				'Unbooked Minor Downtime': 6939,
+				'Planned Downtime (min)': 0,
+				'Changeover Loss (min)': 0,
+				'DG/WG Unavailability (min)': 0,
+				'Quality Loss / Checks (min)': 2,
+				'Cleaning (min)': 0,
+				'Non Operational time (min)': 0,
+				'Line Start Up and Shut Down Loss (min)': 8,
+				'Common/Other Losses (min)': 0,
+				'Performance Losses (min)': 65,
+				'Machine Unavailability Losses (min)': 0,
+				'Operating Hours (min)': 915,
+				'Machine Hours (min)': 659,
+				'Factory Efficiency': 105.08,
+				'Operating Efficiency': 105.08,
+				'Rated Performance Rate': 159.7,
+				'Sensor Rated Performance Rate': 146.1,
+				'Constraint Performance Rate': 146.1,
+				'Machine Reliability': 80.22,
+				Availability: 72.1,
+				OEE: 115.11,
+				'Sensor OEE': 105.31,
+				'Constraint OEE': 105.32,
+			},
+		],
 	};
 
 	try {
@@ -597,45 +747,530 @@ app.post('/generate-dashboard', async (c) => {
 		// const isConfigMode = !!config;
 
 		// Config Mode: Update the chart configuration (non-streaming)
+		// const llmPrompt = `
+		// 	You are a dashboard design expert. Based on the following prompt and data, create a JSON configuration for a dynamic dashboard with multiple components.
+
+		// 	User Prompt: "${prompt}"
+
+		// 	Available Data: ${JSON.stringify(sampleData, null, 2)}
+
+		// 	Respond with ONLY a valid JSON configuration for a dashboard with multiple components. The configuration should follow this format:
+
+		// 	{
+		// 	"title": "Dashboard Title",
+		// 	"description": "Dashboard description",
+		// 	"layout": "grid" or "tabbed",
+
+		// 	// For grid layout
+		// 	"components": [
+		// 		{
+		// 		"type": "chart",
+		// 		"gridSize": 6, // Size in MUI grid (1-12, where 12 is full width)
+		// 		"chartConfig": {
+		// 			"type": "bar|line|pie|area|radar|scatter|heatmap",
+		// 			"title": "Chart Title",
+		// 			"description": "Brief description",
+		// 			"height": 350,
+		// 			"data": {
+		// 			"categories": ["Category1", "Category2", ...],
+		// 			"series": [
+		// 				{
+		// 				"name": "Series Name",
+		// 				"data": [value1, value2, ...]
+		// 				}
+		// 			]
+		// 			},
+		// 			"xAxisTitle": "X-Axis Title",
+		// 			"yAxisTitle": "Y-Axis Title",
+		// 			"options": {}
+		// 		}
+		// 		},
+		// 		{
+		// 		"type": "table",
+		// 		"gridSize": 6,
+		// 		"tableConfig": {
+		// 			"title": "Table Title",
+		// 			"description": "Brief description",
+		// 			"dense": true,
+		// 			"columns": [
+		// 			{
+		// 				"header": "Column Name",
+		// 				"field": "fieldName",
+		// 				"align": "left|right|center"
+		// 			}
+		// 			],
+		// 			"data": [
+		// 			{
+		// 				"fieldName": "value",
+		// 				...
+		// 			}
+		// 			]
+		// 		}
+		// 		},
+		// 		{
+		// 		"type": "stat",
+		// 		"gridSize": 3,
+		// 		"statConfig": {
+		// 			"title": "Stat Title",
+		// 			"value": "Value",
+		// 			"change": 12.5, // Percentage change
+		// 			"period": "vs last period"
+		// 		}
+		// 		},
+		// 		{
+		// 		"type": "list",
+		// 		"gridSize": 6,
+		// 		"listConfig": {
+		// 			"title": "List Title",
+		// 			"description": "Brief description",
+		// 			"items": [
+		// 			{
+		// 				"primary": "Primary Text",
+		// 				"secondary": "Secondary Text",
+		// 				"avatar": "avatar_url",
+		// 				"value": "Value",
+		// 				"valueColor": "success.main",
+		// 				"highlighted": true
+		// 			}
+		// 			]
+		// 		}
+		// 		},
+		// 		{
+		// 		"type": "filter",
+		// 		"gridSize": 12,
+		// 		"filterConfig": {
+		// 			"title": "Filter Title",
+		// 			"type": "dropdown|toggle|tabs",
+		// 			"label": "Filter Label",
+		// 			"defaultValue": "value",
+		// 			"options": [
+		// 			{
+		// 				"label": "Option Label",
+		// 				"value": "option_value"
+		// 			}
+		// 			]
+		// 		}
+		// 		},
+		// 		{
+		// 		"type": "text",
+		// 		"gridSize": 12,
+		// 		"textConfig": {
+		// 			"title": "Text Title",
+		// 			"content": "Text content goes here",
+		// 			"variant": "body1|h5|subtitle1"
+		// 		}
+		// 		}
+		// 	],
+
+		// 	// For tabbed layout
+		// 	"tabs": [
+		// 		{
+		// 		"label": "Tab Label",
+		// 		"components": [
+		// 			// Same component objects as above
+		// 		]
+		// 		}
+		// 	]
+		// 	}
+
+		// 	Analyze the data and user's intent to create the most appropriate dashboard. Include a mix of different component types based on the prompt and available data.
+		// `;
+
 		const llmPrompt = `
-			You are a dashboard design expert. Based on the following prompt and data, create a JSON configuration for a dynamic dashboard with multiple components.
-			
-			User Prompt: "${prompt}"
-			
-			Available Data: ${JSON.stringify(sampleData, null, 2)}
-			
-			Respond with ONLY a valid JSON configuration for a dashboard with multiple components. The configuration should follow this format:
-			
+	You are an expert in dashboard design and data visualization, specializing in ApexCharts. Based on the user's prompt and the provided raw data, generate a JSON configuration for a dynamic dashboard with multiple components (charts, tables, stats, etc.) that delivers precise, error-free insights tailored to the user's intent. The dashboard must use ApexCharts for all chart components, and the configuration must match ApexCharts' expected structure.
+
+	User Prompt: "${prompt}"
+
+Available Data: ${JSON.stringify(sampleData, null, 2)}
+
+	Your task:
+	1. Analyze the raw data and the user's prompt to determine the most effective way to process it for maximum insight and accuracy. Options include:
+		- Grouping or aggregating data by a field (e.g., a categorical column like "department" or "Line") if it reveals trends or comparisons.
+		- Calculating sums, averages, or other statistics for numeric fields based on their semantic meaning (e.g., totals for counts, averages for percentages).
+		- Preserving individual records if detailed granularity is more valuable.
+		- Identifying and highlighting trends, outliers, or performance gaps.
+	2. Special handling for duplicate fields:
+		- If a field (e.g., "Line") has multiple entries with different values in another field (e.g., "SKU Information"), treat each entry as distinct rather than aggregating or skipping them.
+		- When confusion arises (e.g., in a "Line vs OEE" chart), list all relevant entries separately and include the differentiating factor (e.g., "SKU Information") in labels or descriptions for clarity.
+	3. Explore the full dataset:
+		- Analyze all available fields and prioritize those critical for decision-making (e.g., production output, efficiency metrics, downtime, etc.).
+		- Don’t limit focus to a few fields—use the richness of the data to provide a comprehensive view.
+	4. Design a dashboard with a diverse mix of components (charts, tables, stats) that:
+		- Includes at least 3-5 components to cover different aspects of the data (e.g., comparisons, proportions, correlations, summaries).
+		- Uses a variety of chart types appropriately matched to the data and prompt:
+			- Bar charts for comparisons of numerical values across categories (e.g., "Line vs OEE", "sales by department"). Prefer bar charts for comparisons unless the prompt explicitly requests a different chart type.
+			- Column charts (a variant of bar charts) for multi-series comparisons over categories.
+			- Pie charts for proportions (e.g., breakdown of downtime categories), ensuring categories are meaningful, non-zero, and correctly labeled.
+			- Line charts for trends (if a time-based or sequential column is present).
+			- Area charts for trends with filled areas, especially for cumulative data.
+			- Scatter charts for correlations (e.g., two numerical fields like "OEE vs downtime").
+			- Radar charts for comparing multiple variables across categories.
+			- Heatmap charts for visualizing data intensity across two dimensions (e.g., time vs category).
+		- Visualizes key metrics with precision and clarity across multiple dimensions.
+		- Enables comparisons across relevant categories, ensuring all distinct entries are represented.
+		- Highlights actionable insights (e.g., inefficiencies, bottlenecks, top performers).
+		- Adapts dynamically to the data structure and prompt without assumptions.
+	5. Ensure chart data integrity:
+		- For all charts, only include non-zero values and ensure categories/labels are explicitly labeled with the corresponding field names (e.g., "Unbooked Minor Downtime" instead of "series-1").
+		- For pie charts, map categorical labels to field names and numerical values to non-zero data points.
+		- If a chart cannot be meaningfully generated (e.g., no non-zero data for a pie chart, or no time data for a line chart), replace it with a more suitable component like a stat or table summarizing the data.
+	6. Handle dynamic formatters in JSON:
+		- Do NOT include JavaScript functions directly in the JSON output (e.g., "formatter": function() {...}).
+		- Include stringified functions (e.g., "formatter": "function() {...}").
+
+	7. Ensure the output is error-free, avoids generic placeholders (e.g., "series-1"), and directly reflects the provided data.
+
+	Respond with ONLY a valid JSON configuration for a dashboard with multiple components, following this format:
+
+	{
+		"title": "Dashboard Title",
+		"description": "Dashboard description",
+		"layout": "grid",
+		"components": [
 			{
-			"title": "Dashboard Title",
-			"description": "Dashboard description",
-			"layout": "grid" or "tabbed",
-			
-			// For grid layout
-			"components": [
-				{
 				"type": "chart",
-				"gridSize": 6, // Size in MUI grid (1-12, where 12 is full width)
+				"gridSize": 6,
 				"chartConfig": {
-					"type": "bar|line|pie|area|radar|scatter|heatmap",
-					"title": "Chart Title",
-					"description": "Brief description",
+					// Line Chart Example
+					"type": "line",
+					"title": "Product Trends by Month",
+					"description": "Line chart showing product trends over months",
 					"height": 350,
-					"data": {
-					"categories": ["Category1", "Category2", ...],
 					"series": [
 						{
-						"name": "Series Name",
-						"data": [value1, value2, ...]
+							"name": "Desktops",
+							"data": [10, 41, 35, 51, 49, 62, 69, 91, 148]
 						}
-					]
-					},
-					"xAxisTitle": "X-Axis Title",
-					"yAxisTitle": "Y-Axis Title",
-					"options": {}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "line",
+							"zoom": {
+								"enabled": false
+							}
+						},
+						"dataLabels": {
+							"enabled": false
+						},
+						"stroke": {
+							"curve": "straight"
+						},
+						"title": {
+							"text": "Product Trends by Month",
+							"align": "left"
+						},
+						"grid": {
+							"row": {
+								"colors": ["#f3f3f3", "transparent"],
+								"opacity": 0.5
+							}
+						},
+						"xaxis": {
+							"categories": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"]
+						}
+					}
 				}
-				},
-				{
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Bar Chart Example (Horizontal)
+					"type": "bar",
+					"title": "Sales by Country",
+					"description": "Horizontal bar chart showing sales by country",
+					"height": 350,
+					"series": [
+						{
+							"data": [400, 430, 448, 470, 540, 580, 690, 1100, 1200, 1380]
+						}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "bar"
+						},
+						"plotOptions": {
+							"bar": {
+								"borderRadius": 4,
+								"borderRadiusApplication": "end",
+								"horizontal": true
+							}
+						},
+						"dataLabels": {
+							"enabled": false
+						},
+						"xaxis": {
+							"categories": ["South Korea", "Canada", "United Kingdom", "Netherlands", "Italy", "France", "Japan", "United States", "China", "Germany"]
+						}
+					}
+				}
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Column Chart Example (Vertical Bar with Multiple Series)
+					"type": "bar",
+					"title": "Financial Metrics by Month",
+					"description": "Column chart showing financial metrics over months",
+					"height": 350,
+					"series": [
+						{
+							"name": "Net Profit",
+							"data": [44, 55, 57, 56, 61, 58, 63, 60, 66]
+						},
+						{
+							"name": "Revenue",
+							"data": [76, 85, 101, 98, 87, 105, 91, 114, 94]
+						},
+						{
+							"name": "Free Cash Flow",
+							"data": [35, 41, 36, 26, 45, 48, 52, 53, 41]
+						}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "bar"
+						},
+						"plotOptions": {
+							"bar": {
+								"horizontal": false,
+								"columnWidth": "55%",
+								"borderRadius": 5,
+								"borderRadiusApplication": "end"
+							}
+						},
+						"dataLabels": {
+							"enabled": false
+						},
+						"stroke": {
+							"show": true,
+							"width": 2,
+							"colors": ["transparent"]
+						},
+						"xaxis": {
+							"categories": ["Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]
+						},
+						"yaxis": {
+							"title": {
+								"text": "$ (thousands)"
+							}
+						},
+						"fill": {
+							"opacity": 1
+						}
+					}
+				}
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Pie Chart Example
+					"type": "pie",
+					"title": "Team Contributions",
+					"description": "Pie chart showing team contributions",
+					"height": 350,
+					"series": [44, 55, 13, 43, 22],
+					"options": {
+						"chart": {
+							"width": 380,
+							"type": "pie"
+						},
+						"labels": ["Team A", "Team B", "Team C", "Team D", "Team E"],
+						"dataLabels": {
+							"enabled": true,
+							"formatter": "percentageLabel"
+						},
+						"responsive": [
+							{
+								"breakpoint": 480,
+								"options": {
+									"chart": {
+										"width": 200
+									},
+									"legend": {
+										"position": "bottom"
+									}
+								}
+							}
+						]
+					}
+				}
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Area Chart Example
+					"type": "area",
+					"title": "Stock Price Movements",
+					"description": "Area chart showing stock price trends over time",
+					"height": 350,
+					"series": [
+						{
+							"name": "STOCK ABC",
+							"data": [31, 40, 28, 51, 42, 109, 100]
+						}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "area",
+							"zoom": {
+								"enabled": false
+							}
+						},
+						"dataLabels": {
+							"enabled": false
+						},
+						"stroke": {
+							"curve": "straight"
+						},
+						"title": {
+							"text": "Stock Price Movements",
+							"align": "left"
+						},
+						"subtitle": {
+							"text": "Price Movements",
+							"align": "left"
+						},
+						"labels": ["2023-01-01", "2023-02-01", "2023-03-01", "2023-04-01", "2023-05-01", "2023-06-01", "2023-07-01"],
+						"xaxis": {
+							"type": "datetime"
+						},
+						"yaxis": {
+							"opposite": true
+						},
+						"legend": {
+							"horizontalAlign": "left"
+						}
+					}
+				}
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Scatter Chart Example
+					"type": "scatter",
+					"title": "Sample Data Scatter",
+					"description": "Scatter chart showing sample data points",
+					"height": 350,
+					"series": [
+						{
+							"name": "SAMPLE A",
+							"data": [
+								[16.4, 5.4], [21.7, 2], [25.4, 3]
+							]
+						},
+						{
+							"name": "SAMPLE B",
+							"data": [
+								[36.4, 13.4], [1.7, 11], [5.4, 8]
+							]
+						}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "scatter",
+							"zoom": {
+								"enabled": true,
+								"type": "xy"
+							}
+						},
+						"xaxis": {
+							"tickAmount": 10,
+							"labels": {
+								"formatter": "decimalLabel"
+							}
+						},
+						"yaxis": {
+							"tickAmount": 7
+						}
+					}
+				}
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Radar Chart Example
+					"type": "radar",
+					"title": "Performance Metrics by Category",
+					"description": "Radar chart comparing performance metrics across categories",
+					"height": 350,
+					"series": [
+						{
+							"name": "Series 1",
+							"data": [80, 50, 30, 40, 100, 20]
+						},
+						{
+							"name": "Series 2",
+							"data": [50, 60, 70, 20, 80, 90]
+						}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "radar"
+						},
+						"dataLabels": {
+							"enabled": true,
+							"formatter": "valueLabel"
+						},
+						"xaxis": {
+							"categories": ["Speed", "Power", "Efficiency", "Durability", "Accuracy", "Reliability"]
+						},
+						"yaxis": {
+							"max": 100
+						}
+					}
+				}
+			},
+			{
+				"type": "chart",
+				"gridSize": 6,
+				"chartConfig": {
+					// Heatmap Chart Example
+					"type": "heatmap",
+					"title": "Activity Heatmap by Day and Hour",
+					"description": "Heatmap showing activity intensity across days and hours",
+					"height": 350,
+					"series": [
+						{
+							"name": "Mon",
+							"data": [10, 20, 30, 40, 50, 60, 70]
+						},
+						{
+							"name": "Tue",
+							"data": [15, 25, 35, 45, 55, 65, 75]
+						},
+						{
+							"name": "Wed",
+							"data": [20, 30, 40, 50, 60, 70, 80]
+						}
+					],
+					"options": {
+						"chart": {
+							"height": 350,
+							"type": "heatmap"
+						},
+						"dataLabels": {
+							"enabled": false
+						},
+						"xaxis": {
+							"categories": ["9AM", "10AM", "11AM", "12PM", "1PM", "2PM", "3PM"]
+						},
+						"colors": ["#008FFB"]
+					}
+				}
+			},
+			{
 				"type": "table",
 				"gridSize": 6,
 				"tableConfig": {
@@ -643,88 +1278,510 @@ app.post('/generate-dashboard', async (c) => {
 					"description": "Brief description",
 					"dense": true,
 					"columns": [
-					{
-						"header": "Column Name",
-						"field": "fieldName",
-						"align": "left|right|center"
-					}
+						{
+							"header": "Column Name",
+							"field": "fieldName",
+							"align": "left"
+						}
 					],
 					"data": [
-					{
-						"fieldName": "value",
-						...
-					}
+						{
+							"fieldName": "value"
+						}
 					]
 				}
-				},
-				{
+			},
+			{
 				"type": "stat",
 				"gridSize": 3,
 				"statConfig": {
 					"title": "Stat Title",
 					"value": "Value",
-					"change": 12.5, // Percentage change
+					"change": 12.5,
 					"period": "vs last period"
 				}
-				},
-				{
-				"type": "list",
-				"gridSize": 6,
-				"listConfig": {
-					"title": "List Title",
-					"description": "Brief description",
-					"items": [
-					{
-						"primary": "Primary Text",
-						"secondary": "Secondary Text",
-						"avatar": "avatar_url",
-						"value": "Value",
-						"valueColor": "success.main",
-						"highlighted": true
-					}
-					]
-				}
-				},
-				{
-				"type": "filter",
-				"gridSize": 12,
-				"filterConfig": {
-					"title": "Filter Title",
-					"type": "dropdown|toggle|tabs",
-					"label": "Filter Label",
-					"defaultValue": "value",
-					"options": [
-					{
-						"label": "Option Label",
-						"value": "option_value"
-					}
-					]
-				}
-				},
-				{
-				"type": "text",
-				"gridSize": 12,
-				"textConfig": {
-					"title": "Text Title",
-					"content": "Text content goes here",
-					"variant": "body1|h5|subtitle1"
-				}
-				}
-			],
-			
-			// For tabbed layout
-			"tabs": [
-				{
-				"label": "Tab Label",
-				"components": [
-					// Same component objects as above
-				]
-				}
-			]
 			}
-			
-			Analyze the data and user's intent to create the most appropriate dashboard. Include a mix of different component types based on the prompt and available data.
-		`;
+		]
+	}
+
+	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data, placeholders, generic labels, or JavaScript functions allowed. Ensure all chart configurations are valid for ApexCharts and match the structure shown in the examples. The "series" field must always be a top-level field in "chartConfig", separate from "options".
+`;
+
+		// const llmPrompt = `
+		// 	You are a dashboard design expert with advanced data analysis skills. Based on the following prompt and raw data, create a JSON configuration for a dynamic dashboard with multiple components. Your goal is to provide meaningful insights by analyzing the data and determining the best way to process it (e.g., aggregating, grouping, or leaving it as is) based on the user's intent and the data's structure.
+
+		// 	User Prompt: "${prompt}"
+
+		// 	Raw Data: ${JSON.stringify({ sampleData }, null, 2)}
+
+		// 	Your task:
+		// 	1. Analyze the raw data and the user's prompt to determine the most insightful way to process it. This could include:
+		// 		- Identifying logical groupings (e.g., by a recurring field like "Line," "SKU," or another key) if aggregation enhances insights.
+		// 		- Calculating sums, averages, or other statistics for numeric fields based on their context (e.g., totals for counts, averages for rates).
+		// 		- Preserving individual records if granularity is more valuable than aggregation.
+		// 		- Highlighting trends, outliers, or comparisons that stand out.
+		// 	2. Use your expertise to infer the meaning of fields (e.g., production totals, efficiency metrics, downtime, etc.) and prioritize those that drive decision-making.
+		// 	3. Design a dashboard with a mix of components (charts, tables, stats) that:
+		// 		- Visualizes key metrics and trends clearly.
+		// 		- Compares performance across relevant categories.
+		// 		- Highlights critical insights (e.g., top performers, bottlenecks, inefficiencies).
+		// 		- Adapts dynamically to the data's structure and the user's intent
+
+		// 	Respond with ONLY a valid JSON configuration for a dashboard with multiple components. The configuration should follow this format:
+
+		// 	{
+		// 		"title": "Dashboard Title",
+		// 		"description": "Dashboard description",
+		// 		"layout": "grid",
+		// 		"components": [
+		// 			{
+		// 				"type": "chart",
+		// 				"gridSize": 6,
+		// 				"chartConfig": {
+		// 					"type": "bar|line|pie|area|radar|scatter|heatmap",
+		// 					"title": "Chart Title",
+		// 					"description": "Brief description",
+		// 					"height": 350,
+		// 					"data": {
+		// 						"categories": ["Category1", "Category2", ...],
+		// 						"series": [
+		// 							{
+		// 								"name": "Series Name",
+		// 								"data": [value1, value2, ...]
+		// 							}
+		// 						]
+		// 					},
+		// 					"xAxisTitle": "X-Axis Title",
+		// 					"yAxisTitle": "Y-Axis Title",
+		// 					"options": {}
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "table",
+		// 				"gridSize": 6,
+		// 				"tableConfig": {
+		// 					"title": "Table Title",
+		// 					"description": "Brief description",
+		// 					"dense": true,
+		// 					"columns": [
+		// 						{
+		// 							"header": "Column Name",
+		// 							"field": "fieldName",
+		// 							"align": "left|right|center"
+		// 						}
+		// 					],
+		// 					"data": [
+		// 						{
+		// 							"fieldName": "value",
+		// 							...
+		// 						}
+		// 					]
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "stat",
+		// 				"gridSize": 3,
+		// 				"statConfig": {
+		// 					"title": "Stat Title",
+		// 					"value": "Value",
+		// 					"change": 12.5,
+		// 					"period": "vs last period"
+		// 				}
+		// 			}
+		// 		]
+		// 	}
+
+		// 	Ensure the dashboard provides meaningful insights tailored to the user's prompt and the data, with no predefined assumptions about aggregation.
+		// `;
+
+		// const llmPrompt = `
+		// 	You are an expert in dashboard design and data analysis, tasked with creating a highly accurate and actionable dashboard configuration for a critical production environment. Based on the user's prompt and the provided raw data, generate a JSON configuration that delivers precise, error-free insights tailored to the user's intent.
+
+		// 	User Prompt: "${prompt}"
+
+		// 	Raw Data: ${JSON.stringify({ sampleData }, null, 2)}
+
+		// 	Your task:
+		// 	1. Thoroughly analyze the raw data and the user's prompt to determine the most effective way to process it for maximum insight and accuracy. Options include:
+		// 		- Grouping or aggregating data by a field (e.g., "Line," "SKU Information," or another key) if it reveals trends or comparisons.
+		// 		- Calculating sums, averages, or other statistics for numeric fields based on their semantic meaning (e.g., totals for production counts, averages for efficiency percentages).
+		// 		- Preserving individual records if detailed granularity is more valuable.
+		// 		- Identifying and highlighting trends, outliers, or performance gaps.
+		// 	2. Special handling for duplicate fields:
+		// 		- If a field like "Line" has multiple entries with different values in another field (e.g., "SKU Information"), treat each entry as distinct rather than aggregating or skipping them.
+		// 		- When confusion arises (e.g., multiple "Line" values in a "Line vs OEE" chart), list all relevant entries separately and include the differentiating factor (e.g., "SKU Information") in labels or descriptions to clarify for the user.
+		// 	3. Infer the meaning of each field (e.g., production output, efficiency, downtime, reliability) and prioritize those critical for decision-making in a production context.
+		// 	4. Design a dashboard with a mix of components (charts, tables, stats) that:
+		// 		- Visualizes key metrics with precision and clarity.
+		// 		- Enables comparisons across relevant categories (e.g., lines, SKUs, or time periods), ensuring all distinct entries are represented when needed.
+		// 		- Highlights actionable insights (e.g., inefficiencies, bottlenecks, top performers).
+		// 		- Adapts dynamically to the data structure and prompt without assumptions.
+		// 	5. Ensure the output is error-free, avoids generic placeholders, and directly reflects the provided data.
+
+		// 	Respond with ONLY a valid JSON configuration for a dashboard with multiple components, following this format:
+
+		// 	{
+		// 		"title": "Dashboard Title",
+		// 		"description": "Dashboard description",
+		// 		"layout": "grid",
+		// 		"components": [
+		// 			{
+		// 				"type": "chart",
+		// 				"gridSize": 6,
+		// 				"chartConfig": {
+		// 					"type": "bar|line|pie|area|radar|scatter|heatmap",
+		// 					"title": "Chart Title",
+		// 					"description": "Brief description",
+		// 					"height": 350,
+		// 					"data": {
+		// 						"categories": ["Category1", "Category2", ...],
+		// 						"series": [
+		// 							{
+		// 								"name": "Series Name",
+		// 								"data": [value1, value2, ...]
+		// 							}
+		// 						]
+		// 					},
+		// 					"xAxisTitle": "X-Axis Title",
+		// 					"yAxisTitle": "Y-Axis Title",
+		// 					"options": {}
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "table",
+		// 				"gridSize": 6,
+		// 				"tableConfig": {
+		// 					"title": "Table Title",
+		// 					"description": "Brief description",
+		// 					"dense": true,
+		// 					"columns": [
+		// 						{
+		// 							"header": "Column Name",
+		// 							"field": "fieldName",
+		// 							"align": "left|right|center"
+		// 						}
+		// 					],
+		// 					"data": [
+		// 						{
+		// 							"fieldName": "value",
+		// 							...
+		// 						}
+		// 					]
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "stat",
+		// 				"gridSize": 3,
+		// 				"statConfig": {
+		// 					"title": "Stat Title",
+		// 					"value": "Value",
+		// 					"change": 12.5,
+		// 					"period": "vs last period"
+		// 				}
+		// 			}
+		// 		]
+		// 	}
+
+		// 	The dashboard must be precise, actionable, and directly tied to the input data and prompt—no dummy data or placeholders allowed.
+		// `;
+		// const llmPrompt = `
+		// 	You are an expert in dashboard design and data analysis, tasked with creating a highly accurate, actionable, and visually diverse dashboard configuration for a critical production environment. Based on the user's prompt and the provided raw data, generate a JSON configuration that delivers precise, error-free insights tailored to the user's intent, utilizing a variety of chart types and the full breadth of the data.
+
+		// 	User Prompt: "${prompt}"
+
+		// 	Raw Data: ${JSON.stringify({ sampleData }, null, 2)}
+
+		// 	Your task:
+		// 	1. Thoroughly analyze the raw data and the user's prompt to determine the most effective way to process it for maximum insight and accuracy. Options include:
+		// 		- Grouping or aggregating data by a field (e.g., "Line," "SKU Information," or another key) if it reveals trends or comparisons.
+		// 		- Calculating sums, averages, or other statistics for numeric fields based on their semantic meaning (e.g., totals for production counts, averages for efficiency percentages).
+		// 		- Preserving individual records if detailed granularity is more valuable.
+		// 		- Identifying and highlighting trends, outliers, or performance gaps.
+		// 	2. Special handling for duplicate fields:
+		// 		- If a field like "Line" has multiple entries with different values in another field (e.g., "SKU Information"), treat each entry as distinct rather than aggregating or skipping them.
+		// 		- When confusion arises (e.g., in a "Line vs OEE" chart), list all relevant entries separately and include the differentiating factor (e.g., "SKU Information") in labels or descriptions for clarity.
+		// 	3. Explore the full dataset:
+		// 		- Analyze all available fields (e.g., production output, efficiency metrics, downtime categories, stoppages, reliability) and prioritize those critical for decision-making in a production context.
+		// 		- Don’t limit focus to a few fields—use the richness of the data to provide a comprehensive view.
+		// 	4. Design a dashboard with a diverse mix of components (charts, tables, stats) that:
+		// 		- Uses a variety of chart types (bar, pie, scatter, line, area, radar, heatmap) appropriately matched to the data:
+		// 			- Bar charts for comparisons (e.g., OEE or Final FG across lines/SKUs).
+		// 			- Pie charts for proportions (e.g., breakdown of downtime categories).
+		// 			- Scatter charts for correlations (e.g., OEE vs. downtime).
+		// 			- Line charts for trends (if time data were present).
+		// 		- Visualizes key metrics with precision and clarity across multiple dimensions (e.g., production, efficiency, losses).
+		// 		- Enables comparisons across relevant categories (e.g., lines, SKUs), ensuring all distinct entries are represented.
+		// 		- Highlights actionable insights (e.g., inefficiencies, bottlenecks, top performers).
+		// 		- Adapts dynamically to the data structure and prompt without assumptions.
+		// 	5. Ensure the output is error-free, avoids generic placeholders, and directly reflects the provided data.
+
+		// 	Respond with ONLY a valid JSON configuration for a dashboard with multiple components, following this format:
+
+		// 	{
+		// 		"title": "Dashboard Title",
+		// 		"description": "Dashboard description",
+		// 		"layout": "grid",
+		// 		"components": [
+		// 			{
+		// 				"type": "chart",
+		// 				"gridSize": 6,
+		// 				"chartConfig": {
+		// 					"type": "bar|line|pie|area|radar|scatter|heatmap",
+		// 					"title": "Chart Title",
+		// 					"description": "Brief description",
+		// 					"height": 350,
+		// 					"data": {
+		// 						"categories": ["Category1", "Category2", ...],
+		// 						"series": [
+		// 							{
+		// 								"name": "Series Name",
+		// 								"data": [value1, value2, ...]
+		// 							}
+		// 						]
+		// 					},
+		// 					"xAxisTitle": "X-Axis Title",
+		// 					"yAxisTitle": "Y-Axis Title",
+		// 					"options": {}
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "table",
+		// 				"gridSize": 6,
+		// 				"tableConfig": {
+		// 					"title": "Table Title",
+		// 					"description": "Brief description",
+		// 					"dense": true,
+		// 					"columns": [
+		// 						{
+		// 							"header": "Column Name",
+		// 							"field": "fieldName",
+		// 							"align": "left|right|center"
+		// 						}
+		// 					],
+		// 					"data": [
+		// 						{
+		// 							"fieldName": "value",
+		// 							...
+		// 						}
+		// 					]
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "stat",
+		// 				"gridSize": 3,
+		// 				"statConfig": {
+		// 					"title": "Stat Title",
+		// 					"value": "Value",
+		// 					"change": 12.5,
+		// 					"period": "vs last period"
+		// 				}
+		// 			}
+		// 		]
+		// 	}
+
+		// 	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data or placeholders allowed.
+		// `;
+		// const llmPrompt = `
+		// 	You are an expert in dashboard design and data analysis, tasked with creating a highly accurate, actionable, and visually diverse dashboard configuration for a critical production environment. Based on the user's prompt and the provided raw data, generate a JSON configuration that delivers precise, error-free insights tailored to the user's intent, utilizing a variety of chart types and the full breadth of the data.
+
+		// 	User Prompt: "${prompt}"
+
+		// 	Raw Data: ${JSON.stringify({ sampleData }, null, 2)}
+
+		// 	Your task:
+		// 	1. Thoroughly analyze the raw data and the user's prompt to determine the most effective way to process it for maximum insight and accuracy. Options include:
+		// 		- Grouping or aggregating data by a field (e.g., "Line," "SKU Information," or another key) if it reveals trends or comparisons.
+		// 		- Calculating sums, averages, or other statistics for numeric fields based on their semantic meaning (e.g., totals for production counts, averages for efficiency percentages).
+		// 		- Preserving individual records if detailed granularity is more valuable.
+		// 		- Identifying and highlighting trends, outliers, or performance gaps.
+		// 	2. Special handling for duplicate fields:
+		// 		- If a field like "Line" has multiple entries with different values in another field (e.g., "SKU Information"), treat each entry as distinct rather than aggregating or skipping them.
+		// 		- When confusion arises (e.g., in a "Line vs OEE" chart), list all relevant entries separately and include the differentiating factor (e.g., "SKU Information") in labels or descriptions for clarity.
+		// 	3. Explore the full dataset:
+		// 		- Analyze all available fields (e.g., production output, efficiency metrics, downtime categories, stoppages, reliability) and prioritize those critical for decision-making in a production context.
+		// 		- Don’t limit focus to a few fields—use the richness of the data to provide a comprehensive view.
+		// 	4. Design a dashboard with a diverse mix of components (charts, tables, stats) that:
+		// 		- Uses a variety of chart types (bar, pie, scatter, line, area, radar, heatmap) appropriately matched to the data:
+		// 			- Bar charts for comparisons (e.g., OEE or Final FG across lines/SKUs).
+		// 			- Pie charts for proportions (e.g., breakdown of downtime categories), ensuring categories are meaningful, non-zero, and correctly labeled (e.g., "Unbooked Minor Downtime," "Quality Loss / Checks").
+		// 			- Scatter charts for correlations (e.g., OEE vs. downtime).
+		// 			- Line charts for trends (if time data were present).
+		// 		- Visualizes key metrics with precision and clarity across multiple dimensions (e.g., production, efficiency, losses).
+		// 		- Enables comparisons across relevant categories (e.g., lines, SKUs), ensuring all distinct entries are represented.
+		// 		- Highlights actionable insights (e.g., inefficiencies, bottlenecks, top performers).
+		// 		- Adapts dynamically to the data structure and prompt without assumptions.
+		// 	5. Ensure chart data integrity:
+		// 		- For pie charts (or any chart), only include non-zero values and ensure categories are explicitly labeled with the corresponding field names (e.g., "Unbooked Minor Downtime" instead of "series-1").
+		// 		- If a chart cannot be meaningfully generated (e.g., no non-zero data for a pie chart), replace it with a more suitable component like a stat or table summarizing the data.
+		// 	6. Ensure the output is error-free, avoids generic placeholders (e.g., "series-1"), and directly reflects the provided data.
+
+		// 	Respond with ONLY a valid JSON configuration for a dashboard with multiple components, following this format:
+
+		// 	{
+		// 		"title": "Dashboard Title",
+		// 		"description": "Dashboard description",
+		// 		"layout": "grid",
+		// 		"components": [
+		// 			{
+		// 				"type": "chart",
+		// 				"gridSize": 6,
+		// 				"chartConfig": {
+		// 					"type": "bar|line|pie|area|radar|scatter|heatmap",
+		// 					"title": "Chart Title",
+		// 					"description": "Brief description",
+		// 					"height": 350,
+		// 					"data": {
+		// 						"categories": ["Category1", "Category2", ...],
+		// 						"series": [
+		// 							{
+		// 								"name": "Series Name",
+		// 								"data": [value1, value2, ...]
+		// 							}
+		// 						]
+		// 					},
+		// 					"xAxisTitle": "X-Axis Title",
+		// 					"yAxisTitle": "Y-Axis Title",
+		// 					"options": {}
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "table",
+		// 				"gridSize": 6,
+		// 				"tableConfig": {
+		// 					"title": "Table Title",
+		// 					"description": "Brief description",
+		// 					"dense": true,
+		// 					"columns": [
+		// 						{
+		// 							"header": "Column Name",
+		// 							"field": "fieldName",
+		// 							"align": "left|right|center"
+		// 						}
+		// 					],
+		// 					"data": [
+		// 						{
+		// 							"fieldName": "value",
+		// 							...
+		// 						}
+		// 					]
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "stat",
+		// 				"gridSize": 3,
+		// 				"statConfig": {
+		// 					"title": "Stat Title",
+		// 					"value": "Value",
+		// 					"change": 12.5,
+		// 					"period": "vs last period"
+		// 				}
+		// 			}
+		// 		]
+		// 	}
+
+		// 	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data, placeholders, or generic labels allowed.
+		// `;
+
+		const { data } = sampleData;
+		let formattedData = '';
+		if (Array.isArray(data) && data.length > 0) {
+			const headers = Object.keys(data[0]);
+			formattedData = headers.join(', ') + '\n';
+			formattedData += data.map((row) => headers.map((header) => row[header] ?? '').join(', ')).join('\n');
+		} else {
+			formattedData = 'No data available.';
+		}
+
+		// const llmPrompt = `
+		// 	You are an expert in dashboard design and data analysis, tasked with creating a highly accurate, actionable, and visually diverse dashboard configuration for a critical production environment. Based on the user's prompt and the provided raw data, generate a JSON configuration for a dashboard with multiple components (charts, tables, stats) that delivers precise, error-free insights tailored to the user's intent.
+
+		// 	User Prompt: "${prompt}"
+
+		// 	Raw Data (in CSV-like format):
+		// 	${formattedData}
+
+		// 	Your task:
+		// 	1. Analyze the raw data and the user's prompt to determine the most effective way to process it for maximum insight and accuracy. Options include:
+		// 		- Grouping or aggregating data by a field (e.g., a categorical column like "department" or "Line") if it reveals trends or comparisons.
+		// 		- Calculating sums, averages, or other statistics for numeric fields based on their semantic meaning (e.g., totals for counts, averages for percentages).
+		// 		- Preserving individual records if detailed granularity is more valuable.
+		// 		- Identifying and highlighting trends, outliers, or performance gaps.
+		// 	2. Special handling for duplicate fields:
+		// 		- If a field (e.g., "Line") has multiple entries with different values in another field (e.g., "SKU Information"), treat each entry as distinct rather than aggregating or skipping them.
+		// 		- When confusion arises (e.g., in a "Line vs OEE" chart), list all relevant entries separately and include the differentiating factor (e.g., "SKU Information") in labels or descriptions for clarity.
+		// 	3. Explore the full dataset:
+		// 		- Analyze all available fields and prioritize those critical for decision-making (e.g., production output, efficiency metrics, downtime, etc.).
+		// 		- Don’t limit focus to a few fields—use the richness of the data to provide a comprehensive view.
+		// 	4. Design a dashboard with a diverse mix of components (charts, tables, stats) that:
+		// 		- Includes at least 3-5 components to cover different aspects of the data (e.g., comparisons, proportions, correlations, summaries).
+		// 		- Uses a variety of chart types (bar, pie, scatter, line, area, radar, heatmap) appropriately matched to the data:
+		// 			- Bar charts for comparisons (e.g., numerical values across categories like "sales by department").
+		// 			- Pie charts for proportions (e.g., breakdown of downtime categories), ensuring categories are meaningful, non-zero, and correctly labeled.
+		// 			- Scatter charts for correlations (e.g., two numerical fields like "OEE vs downtime").
+		// 			- Line charts for trends (if a time-based or sequential column is present).
+		// 		- Visualizes key metrics with precision and clarity across multiple dimensions.
+		// 		- Enables comparisons across relevant categories, ensuring all distinct entries are represented.
+		// 		- Highlights actionable insights (e.g., inefficiencies, bottlenecks, top performers).
+		// 		- Adapts dynamically to the data structure and prompt without assumptions.
+
+		// 	5. Ensure chart data integrity:
+		// 		- For all charts, only include non-zero values and ensure categories are explicitly labeled with the corresponding field names (e.g., "Unbooked Minor Downtime" instead of "series-1").
+		// 		- For pie charts, map categorical labels to field names and numerical values to non-zero data points.
+		// 		- If a chart cannot be meaningfully generated (e.g., no non-zero data for a pie chart, or no time data for a line chart), replace it with a more suitable component like a stat or table summarizing the data.
+		// 	6. Handle dynamic functions in JSON:
+		// 		- Do NOT include JavaScript functions directly in the JSON output (e.g., "formatter": function() {...}).
+		// 		- Instead, if a dynamic function is needed (e.g., for a chart's formatter), include it as a string representation of the function (e.g., "formatter": "function() { return this.point.name + ': ' + this.percentage.toFixed(1) + '%'; }").
+		// 		- Ensure all other values in the JSON are valid JSON types: strings, numbers, objects, arrays, booleans, or null.
+		// 	7. Ensure the output is error-free, avoids generic placeholders (e.g., "series-1"), and directly reflects the provided data.
+		// 	8. For chart use accurate apex chart config.
+		// 	{
+		// 		"title": "Dashboard Title",
+		// 		"description": "Dashboard description",
+		// 		"layout": "grid",
+		// 		"components": [
+		// 			{
+		// 				"type": "chart",
+		// 				"gridSize": 6,
+		// 				"chartConfig": {
+		// 					"use accurate apex chart config here "
+		// 			},
+		// 			{
+		// 				"type": "table",
+		// 				"gridSize": 6,
+		// 				"tableConfig": {
+		// 					"title": "Table Title",
+		// 					"description": "Brief description",
+		// 					"dense": true,
+		// 					"columns": [
+		// 						{
+		// 							"header": "Column Name",
+		// 							"field": "fieldName",
+		// 							"align": "left|right|center"
+		// 						}
+		// 					],
+		// 					"data": [
+		// 						{
+		// 							"fieldName": "value",
+		// 							...
+		// 						}
+		// 					]
+		// 				}
+		// 			},
+		// 			{
+		// 				"type": "stat",
+		// 				"gridSize": 3,
+		// 				"statConfig": {
+		// 					"title": "Stat Title",
+		// 					"value": "Value",
+		// 					"change": 12.5,
+		// 					"period": "vs last period"
+		// 				}
+		// 			}
+		// 		]
+		// 	}
+
+		// 	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data, placeholders, generic labels, or direct JavaScript functions allowed.
+		// `;
 
 		const initialMessages = [{ role: 'user', content: llmPrompt }];
 		const userMessage = { role: 'user', content: `${prompt}` };
@@ -737,6 +1794,7 @@ app.post('/generate-dashboard', async (c) => {
 
 		const resultText = response.text || response.data; // Adjust based on your API response structure
 		console.log('Raw response:', resultText);
+
 		let dashboardConfig = null;
 		// Extract JSON from the response text
 		const jsonMatch = resultText.match(/\{[\s\S]*\}/);
@@ -747,6 +1805,22 @@ app.post('/generate-dashboard', async (c) => {
 			dashboardConfig = JSON.parse(resultText);
 		}
 
+		// console.log('dashboardConfig', dashboardConfig);
+		// dashboardConfig.components.forEach((component) => {
+		// 	if (component.type === 'chart' && component.chartConfig && component.chartConfig.options) {
+		// 		const options = component.chartConfig.options;
+		// 		if (options.dataLabels && options.dataLabels.formatter && typeof options.dataLabels.formatter === 'string') {
+		// 			try {
+		// 				// Convert the stringified function into an actual function
+		// 				options.dataLabels.formatter = new Function('return ' + options.dataLabels.formatter)();
+		// 			} catch (evalError) {
+		// 				console.error('Failed to evaluate formatter function:', evalError);
+		// 				// Fallback to a default formatter if evaluation fails
+		// 				options.dataLabels.formatter = (val, opts) => `${opts.w.globals.labels[opts.seriesIndex]}: ${val.toFixed(1)}%`;
+		// 			}
+		// 		}
+		// 	}
+		// });
 		// const cleanedText = resultText
 		// 	.replace(/```json/g, '')
 		// 	.replace(/```/g, '')
