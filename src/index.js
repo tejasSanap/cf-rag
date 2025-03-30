@@ -12,7 +12,7 @@ app.use(
 	})
 );
 const google = createGoogleGenerativeAI({
-	apiKey: 'AIzaSyBINgV2AnsZjTEyb8lExjBNWC5Ju0qlLKs',
+	apiKey: '',
 });
 
 app.get('/', async (c) => {
@@ -78,6 +78,56 @@ app.post('/notes', async (c) => {
 	} catch (e) {
 		console.error(e);
 		return c.text('Error creating note', 500);
+	}
+});
+
+app.post('/api/ai-chat', async (c) => {
+	try {
+		// Parse JSON request body
+		const { query, context } = await c.req.json();
+
+		if (!query) {
+			console.warn('⚠️ Missing query in request');
+			return c.text('Query is required', 400);
+		}
+
+		console.log('✅ Received query:', query);
+		console.log('📊 Context data:', context);
+
+		const systemPrompt2 = `You are an AI assistant called SuperPumped, specializing in Industrial IoT (IIoT) data analysis. 
+		Your role is to analyze industrial data, detect patterns, and provide insights based on the given context. 
+		Your responses should be precise, actionable, and data-driven.
+
+		Use the following context for analysis:
+		\n\n${JSON.stringify(context, null, 2)}
+
+		`;
+
+		// Initial AI conversation messages
+		const initialMessages = [
+			{ role: 'user', content: systemPrompt2 },
+			{ role: 'assistant', content: 'Hello, how can I help?' },
+		];
+
+		const userMessage = { role: 'user', content: query };
+
+		// Check if AI model is available
+		// if (!aiModel) {
+		// 	console.error('❌ AI model is not initialized!');
+		// 	return c.text('AI model is unavailable. Try again later.', 500);
+		// }
+
+		// AI response
+		const response = await streamText({
+			model: google('gemini-2.0-flash-001'), // Use pre-initialized model
+			messages: [...initialMessages, userMessage],
+		});
+
+		// Convert response to text stream
+		return response.toTextStreamResponse();
+	} catch (error) {
+		console.error('🚨 Error in /api/chat:', error.message || error);
+		return c.text('Failed to process the request. Please try again later.', 500);
 	}
 });
 
@@ -167,7 +217,7 @@ Be concise, accurate, and return valid JSON.`;
 
 		// Call Gemini API
 		const response = await generateText({
-			model: google('gemini-1.5-flash'),
+			model: google('gemini-2.5-pro-exp-03-25'),
 			messages: [...initialMessages, userPromptMessage],
 		});
 
@@ -245,29 +295,44 @@ app.post('/mrt-chat', async (c) => {
 		- Analyze the data to answer queries about highest/lowest values, averages, counts, filtering, or other aggregations.
 		- Respond in a conversational tone, as if speaking to the user directly.
 		- Do not modify the data or table configuration; only provide a textual response.
-		- If a column name in the prompt doesn't match the data, try to infer the closest match (e.g., "sales" might be "Sales").
+		- If a column name in the prompt doesn't match the data, try to infer the closest match
 		- Handle numerical comparisons (e.g., "above", "below") and aggregations (e.g., "average", "total") accurately.
-		- For queries involving names, use both firstName and lastName if available (e.g., "John Doe").
-  
-		Examples:
-		1. Data: "firstName, lastName, sales\nJohn, Doe, 50000\nJane, Smith, 75000"
-		   Prompt: "who has the highest sales?"
-		   Response: "Jane Smith has the highest sales with a value of 75000."
-		2. Data: "firstName, lastName, salary, department\nJohn, Doe, 60000, Sales\nJane, Smith, 80000, Sales\nBob, Johnson, 55000, Marketing"
-		   Prompt: "average salary in each department"
-		   Response: "Average salary in Sales: 70000. Average salary in Marketing: 55000."
-		3. Data: "firstName, lastName, region\nJohn, Doe, North\nJane, Smith, South\nBob, Johnson, North"
-		   Prompt: "how many people in each region?"
-		   Response: "There are 2 people in North and 1 person in South."
-		4. Data: "firstName, lastName, salary, department\nJohn, Doe, 60000, Sales\nJane, Smith, 80000, Sales"
-		   Prompt: "list people in Sales with salary above 70000"
-		   Response: "Jane Smith has a salary of 80000 in Sales."
-		5. Data: "firstName, lastName, age\nJohn, Doe, 30\nJane, Smith, 25"
-		   Prompt: "who is the youngest?"
-		   Response: "Jane Smith is the youngest with an age of 25."
-  
+
 		Now, analyze the following data and answer the user's prompt.
 	  `;
+		//   const systemPrompt = `
+		//   You are an AI assistant called Superpumped that answers conversational queries about table data for a Material React Table (MRT) V2 component.
+		//   The table data is provided in a CSV-like format, where the first row contains the column headers, and each subsequent row represents a data entry.
+		//   Your task is to interpret the user's prompt and provide a concise, natural language response based on the data.
+
+		//   Key Instructions:
+		//   - The data is formatted as: "header1, header2, header3\nvalue1, value2, value3\n..."
+		//   - Analyze the data to answer queries about highest/lowest values, averages, counts, filtering, or other aggregations.
+		//   - Respond in a conversational tone, as if speaking to the user directly.
+		//   - Do not modify the data or table configuration; only provide a textual response.
+		//   - If a column name in the prompt doesn't match the data, try to infer the closest match (e.g., "sales" might be "Sales").
+		//   - Handle numerical comparisons (e.g., "above", "below") and aggregations (e.g., "average", "total") accurately.
+		//   - For queries involving names, use both firstName and lastName if available (e.g., "John Doe").
+
+		//   Examples:
+		//   1. Data: "firstName, lastName, sales\nJohn, Doe, 50000\nJane, Smith, 75000"
+		// 	 Prompt: "who has the highest sales?"
+		// 	 Response: "Jane Smith has the highest sales with a value of 75000."
+		//   2. Data: "firstName, lastName, salary, department\nJohn, Doe, 60000, Sales\nJane, Smith, 80000, Sales\nBob, Johnson, 55000, Marketing"
+		// 	 Prompt: "average salary in each department"
+		// 	 Response: "Average salary in Sales: 70000. Average salary in Marketing: 55000."
+		//   3. Data: "firstName, lastName, region\nJohn, Doe, North\nJane, Smith, South\nBob, Johnson, North"
+		// 	 Prompt: "how many people in each region?"
+		// 	 Response: "There are 2 people in North and 1 person in South."
+		//   4. Data: "firstName, lastName, salary, department\nJohn, Doe, 60000, Sales\nJane, Smith, 80000, Sales"
+		// 	 Prompt: "list people in Sales with salary above 70000"
+		// 	 Response: "Jane Smith has a salary of 80000 in Sales."
+		//   5. Data: "firstName, lastName, age\nJohn, Doe, 30\nJane, Smith, 25"
+		// 	 Prompt: "who is the youngest?"
+		// 	 Response: "Jane Smith is the youngest with an age of 25."
+
+		//   Now, analyze the following data and answer the user's prompt.
+		// `;
 		console.log('formattedData', formattedData);
 		const content = `
 		The following table data is provided for analysis:
@@ -279,7 +344,7 @@ app.post('/mrt-chat', async (c) => {
 		const userMessage = { role: 'user', content: `${content}\n${prompt}` };
 
 		const response = await streamText({
-			model: google('gemini-1.5-flash'),
+			model: google('gemini-2.5-pro-exp-03-25'),
 			messages: [...initialMessages, userMessage],
 		});
 
@@ -416,46 +481,140 @@ app.post('/chart-config', async (c) => {
 
 		if (isConfigMode) {
 			// Config Mode: Update the chart configuration (non-streaming)
-			const systemPrompt = `
-		  You are an AI assistant called Superpumped that generates and updates chart configurations for ApexCharts based on table data and user prompts.
-		  The table data is provided in a CSV-like format, where the first row contains the column headers, and each subsequent row represents a data entry.
-		  The current chart configuration is provided in JSON format.
-		  Your task is to interpret the user's prompt and return a JSON object representing the updated ApexCharts configuration, including:
-		  - "options": The chart options (e.g., chart type, xaxis, yaxis, labels).
-		  - "series": The data series for the chart (e.g., [{ name: "Sales", data: [50000, 75000] }]).
-		  
-		  Key Instructions:
-		  - The data is formatted as: "header1, header2, header3\nvalue1, value2, value3\n..."
-		  - The current chart config is: ${JSON.stringify(config)}.
-		  - Determine the appropriate chart type based on the prompt (e.g., "bar chart" → bar, "pie chart" → pie, "line chart" → line).
-		  - If the chart type is not specified, keep the current chart type or default to a bar chart for numerical data grouped by a categorical column.
-		  - Aggregate data as needed (e.g., sum, average, count) based on the prompt.
-		  - For bar charts, use a categorical column (e.g., department) for the x-axis and a numerical column (e.g., sales) for the y-axis.
-		  - For pie charts, use a categorical column for labels and a numerical column for values.
-		  - For line charts, ensure there’s a time-based or sequential column for the x-axis.
-		  - If the prompt is unclear or the data doesn’t support the requested chart, return the current chart config with a message in the response.
-		  - Preserve existing chart options unless the prompt explicitly changes them.
-		  - Return a valid ApexCharts configuration in JSON format.
-  
-		  Examples:
-		  1. Data: "firstName, lastName, sales, department\nJohn, Doe, 50000, Sales\nJane, Smith, 75000, Sales\nBob, Johnson, 30000, Marketing"
-			 Current Config: { "options": { "chart": { "type": "bar" }, "xaxis": { "categories": ["Sales", "Marketing"] }, "yaxis": { "title": { "text": "Sales" } } }, "series": [{ "name": "Sales", "data": [125000, 30000] }] }
-			 Prompt: "change to a pie chart"
-			 Response: {
-			   "options": { "chart": { "type": "pie" }, "labels": ["Sales", "Marketing"] },
-			   "series": [125000, 30000]
-			 }
-		  2. Data: "firstName, lastName, sales, region\nJohn, Doe, 50000, North\nJane, Smith, 75000, South\nBob, Johnson, 30000, North"
-			 Current Config: { "options": { "chart": { "type": "pie" }, "labels": ["North", "South"] }, "series": [80000, 75000] }
-			 Prompt: "show sales by region as a bar chart"
-			 Response: {
-			   "options": { "chart": { "type": "bar" }, "xaxis": { "categories": ["North", "South"] }, "yaxis": { "title": { "text": "Sales" } } },
-			   "series": [{ "name": "Sales", "data": [80000, 75000] }]
-			 }
-  
-		  Now, analyze the following data and update the chart configuration based on the user's prompt.
-		`;
+			// 	const systemPrompt = `
+			//   You are an AI assistant called Superpumped that generates and updates chart configurations for ApexCharts based on table data and user prompts.
+			//   The table data is provided in a CSV-like format, where the first row contains the column headers, and each subsequent row represents a data entry.
+			//   The current chart configuration is provided in JSON format.
+			//   Your task is to interpret the user's prompt and return a JSON object representing the updated ApexCharts configuration, including:
+			//   - "options": The chart options (e.g., chart type, xaxis, yaxis, labels).
+			//   - "series": The data series for the chart (e.g., [{ name: "Sales", data: [50000, 75000] }]).
 
+			//   Key Instructions:
+			//   - The data is formatted as: "header1, header2, header3\nvalue1, value2, value3\n..."
+			//   - The current chart config is: ${JSON.stringify(config)}.
+			//   - Determine the appropriate chart type based on the prompt (e.g., "bar chart" → bar, "pie chart" → pie, "line chart" → line).
+			//   - If the chart type is not specified, keep the current chart type or default to a bar chart for numerical data grouped by a categorical column.
+			//   - Aggregate data as needed (e.g., sum, average, count) based on the prompt.
+			//   - For bar charts, use a categorical column (e.g., department) for the x-axis and a numerical column (e.g., sales) for the y-axis.
+			//   - For pie charts, use a categorical column for labels and a numerical column for values.
+			//   - For line charts, ensure there’s a time-based or sequential column for the x-axis.
+			//   - If the prompt is unclear or the data doesn’t support the requested chart, return the current chart config with a message in the response.
+			//   - Preserve existing chart options unless the prompt explicitly changes them.
+			//   - Return a valid ApexCharts configuration in JSON format.
+
+			//   Examples:
+			//   1. Data: "firstName, lastName, sales, department\nJohn, Doe, 50000, Sales\nJane, Smith, 75000, Sales\nBob, Johnson, 30000, Marketing"
+			// 	 Current Config: { "options": { "chart": { "type": "bar" }, "xaxis": { "categories": ["Sales", "Marketing"] }, "yaxis": { "title": { "text": "Sales" } } }, "series": [{ "name": "Sales", "data": [125000, 30000] }] }
+			// 	 Prompt: "change to a pie chart"
+			// 	 Response: {
+			// 	   "options": { "chart": { "type": "pie" }, "labels": ["Sales", "Marketing"] },
+			// 	   "series": [125000, 30000]
+			// 	 }
+			//   2. Data: "firstName, lastName, sales, region\nJohn, Doe, 50000, North\nJane, Smith, 75000, South\nBob, Johnson, 30000, North"
+			// 	 Current Config: { "options": { "chart": { "type": "pie" }, "labels": ["North", "South"] }, "series": [80000, 75000] }
+			// 	 Prompt: "show sales by region as a bar chart"
+			// 	 Response: {
+			// 	   "options": { "chart": { "type": "bar" }, "xaxis": { "categories": ["North", "South"] }, "yaxis": { "title": { "text": "Sales" } } },
+			// 	   "series": [{ "name": "Sales", "data": [80000, 75000] }]
+			// 	 }
+
+			//   Now, analyze the following data and update the chart configuration based on the user's prompt.
+			// `;
+			const systemPrompt = `
+			You are ChartGPT, an AI assistant specialized in generating optimal ApexCharts configurations based on data analysis and user requests.
+			
+			DATA FORMAT:
+			${formattedData}
+			
+			CURRENT CONFIGURATION:
+			${JSON.stringify(config, null, 2)}
+			
+			Your task is to analyze the data and user request, then provide a precise ApexCharts configuration JSON that best visualizes the insights.
+			
+			CRITICAL: Your response MUST be valid, parseable JSON. DO NOT include JavaScript functions in your JSON as they will cause parsing errors.
+			
+		FORMATTER PLACEHOLDERS:
+			Instead of including function definitions directly, use ONLY these specific placeholder strings:
+
+			1. General value formatters:
+			- "VALUE_FORMATTER" - Displays values with 0 decimal places
+			- "CURRENCY_FORMATTER" - Adds $ and displays with 0 decimal places
+			- "PERCENTAGE_FORMATTER" - Adds % and displays with 1 decimal place
+			- "K_FORMATTER" - Divides by 1000 and adds 'k' suffix
+			- "SHORT_NUMBER_FORMATTER" - Smart abbreviation (1.2M, 5.4k) based on value size
+
+			2. Date formatters:
+			- "DATE_FORMATTER" - Standard date format (MM/DD/YYYY)
+			- "TIMESTAMP_FORMATTER" - Date with time
+			- "MONTH_YEAR_FORMATTER" - Month and year only (Jan 2023)
+
+			3. Special formatters:
+			- "CUSTOM_LEGEND_FORMATTER" - For legend formatting
+			- "DYNAMIC_TITLE_FORMATTER" - For dynamic chart titles
+
+			Example of INCORRECT (will cause errors):
+			{
+			"tooltip": {
+				"y": {
+				"formatter": function(val) { return "$" + val }
+				"title": {formatter: "(seriesName) => seriesName + ': '"}
+				},				
+			}
+			}
+
+			Example of CORRECT (will parse successfully):
+			{
+			"tooltip": {
+				"y": {
+				"formatter": "CURRENCY_FORMATTER"
+				"title":{
+					"formatter":"SERIES_FORMATTER"
+					}
+				}
+			}
+			}
+			*** Neve ever use function expression as formatter in any case ***
+			RESPONSE FORMAT:
+			Return ONLY a valid JSON object with two main properties:
+			- "options": Chart display settings (type, axes, colors, title, etc.)
+			- "series": Data series formatted appropriately for the chart type
+			
+			CHART TYPE SELECTION GUIDELINES:
+			- Bar charts: Best for comparing quantities across categories
+			- Line charts: Ideal for showing trends over time or sequences
+			- Pie/Donut charts: Effective for showing proportions of a whole (limit to 7 categories max)
+			- Area charts: Good for showing cumulative totals over time
+			- Column charts: Similar to bar but vertical, good for time-based comparisons
+			- Scatter plots: Best for showing correlation between two variables
+			- Heatmaps: Excellent for showing patterns in complex datasets
+			
+			DATA PROCESSING RULES:
+			1. Automatically aggregate data when appropriate (sum, average, count)
+			2. For time series, sort chronologically before plotting
+			3. Limit displayed categories to improve readability (max 10-12 items)
+			4. Format numbers appropriately using string placeholders instead of functions
+			5. Choose appropriate scales to highlight patterns without distortion
+			
+			DESIGN BEST PRACTICES:
+			1. Use clear, descriptive titles and axis labels
+			2. Select a color palette appropriate for the data (sequential, diverging, categorical)
+			3. Add tooltips with detailed information for interactive exploration
+			4. Include legends when multiple series are present
+			5. Set appropriate grid lines and tick marks for readability
+			6. Format dates in user-friendly ways (Month Year instead of timestamps)
+			7. For dense datasets, consider adding zoom/pan capabilities
+			
+			CUSTOMIZATION PRIORITIES:
+			1. If user specifies a chart type, use it unless fundamentally inappropriate
+			2. Respect explicit user preferences for colors, labels, and formatting
+			3. Preserve existing configuration elements unless explicitly changed
+			4. If the user request conflicts with best practices, prioritize clarity and accuracy
+			
+			ERROR HANDLING:
+			If the data cannot support the requested visualization, explain why in a comment property and provide the best alternative configuration.
+			
+			Analyze the data structure carefully before configuring. Identify numerical columns for measures and categorical/date columns for dimensions.
+			`;
 			const content = `
 		  The following table data is provided for analysis:
   
@@ -469,7 +628,7 @@ app.post('/chart-config', async (c) => {
 
 			// Use generateText (non-streaming) for Config Mode
 			const response = await generateText({
-				model: google('gemini-1.5-flash'),
+				model: google('gemini-2.5-pro-exp-03-25'),
 				messages: [...initialMessages, userMessage],
 			});
 
@@ -501,6 +660,7 @@ app.post('/chart-config', async (c) => {
 		return c.text('Failed to process the request', 500);
 	}
 });
+
 app.post('/process-file', async (c) => {
 	const formData = await c.req.formData();
 	const file = formData.get('file');
@@ -916,8 +1076,10 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 		- If a chart cannot be meaningfully generated (e.g., no non-zero data for a pie chart, or no time data for a line chart), replace it with a more suitable component like a stat or table summarizing the data.
 	6. Handle dynamic formatters in JSON:
 		- Do NOT include JavaScript functions directly in the JSON output (e.g., "formatter": function() {...}).
-		- Include stringified functions (e.g., "formatter": "function() {...}").
-
+		- Include stringified functions with correct ApexCharts parameter names:
+		- Use "function(val) { return val + ' %'; }" for data labels (e.g., percentage formatting).
+		- Use "function(val, { seriesIndex, dataPointIndex, w }) { return w.globals.labels[dataPointIndex] + ': ' + val + ' %'; }" for tooltips.
+		- Only include formatters when explicitly needed (e.g., for dataLabels or tooltip), otherwise omit them
 	7. Ensure the output is error-free, avoids generic placeholders (e.g., "series-1"), and directly reflects the provided data.
 
 	Respond with ONLY a valid JSON configuration for a dashboard with multiple components, following this format:
@@ -1788,7 +1950,7 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 
 		// Use generateText (non-streaming) for Config Mode
 		const response = await generateText({
-			model: google('gemini-1.5-flash'),
+			model: google('gemini-2.5-pro-exp-03-25'),
 			messages: [...initialMessages, userMessage],
 		});
 
