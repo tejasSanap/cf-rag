@@ -664,12 +664,15 @@ app.post('/chart-config', async (c) => {
 app.post('/process-file', async (c) => {
 	const formData = await c.req.formData();
 	const file = formData.get('file');
-	const prompt = formData.get('prompt');
 
 	// Validate inputs
-	if (!file || !prompt) {
-		return c.json({ error: 'Missing file or prompt' }, 400);
+	if (!file) {
+		return c.json({ error: 'Missing file' }, 400);
 	}
+	const prompt = formData.get('prompt') || '';
+	if (!prompt) {
+	}
+
 	console.log('file', file);
 	console.log('prompt', prompt);
 	try {
@@ -690,7 +693,11 @@ app.post('/process-file', async (c) => {
 		} else {
 			return c.json({ error: 'Unsupported file type' }, 400);
 		}
-
+		console.log('here 1');
+		if (!prompt) {
+			return c.json({ data: rawData });
+		}
+		console.log('here 2');
 		// Process data with AI
 		const processedData = await processDataWithAI(rawData, prompt);
 		return c.json({
@@ -724,6 +731,7 @@ async function processDataWithAI(rawData, prompt) {
 	  ${JSON.stringify(rawData, null, 2)}
 	  Perform the following operations based on this user prompt: "${prompt}"
 	  Return the transformed data in JSON format.
+	  ONLY RETURN THE DATA AND NOT ANY EXPLAINATION AT ALL.
 	`;
 
 	const initialMessages = [{ role: 'user', content: aiPrompt }];
@@ -731,7 +739,7 @@ async function processDataWithAI(rawData, prompt) {
 
 	// Use generateText (non-streaming) for Config Mode
 	const response = await generateText({
-		model: google('gemini-1.5-flash'),
+		model: google('gemini-2.0-flash-001'),
 		messages: [...initialMessages],
 	});
 
@@ -886,7 +894,7 @@ app.post('/generate-dashboard', async (c) => {
 		const body = await c.req.json();
 		console.log('body', body);
 
-		const { prompt } = body;
+		const { prompt, data } = body;
 
 		// Validate input
 		// if (!prompt || !data || !Array.isArray(data)) {
@@ -1041,7 +1049,7 @@ app.post('/generate-dashboard', async (c) => {
 
 	User Prompt: "${prompt}"
 
-Available Data: ${JSON.stringify(sampleData, null, 2)}
+	Available Data: ${JSON.stringify(data, null, 2)}
 
 	Your task:
 	1. Analyze the raw data and the user's prompt to determine the most effective way to process it for maximum insight and accuracy. Options include:
@@ -1469,6 +1477,176 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data, placeholders, generic labels, or JavaScript functions allowed. Ensure all chart configurations are valid for ApexCharts and match the structure shown in the examples. The "series" field must always be a top-level field in "chartConfig", separate from "options".
 `;
 
+		const llmPrompt2 = `
+You are an expert in dashboard design and data visualization specializing in ApexCharts. Based on the user's prompt and the provided raw data, your task is to generate a fully valid JSON configuration for a dynamic dashboard with multiple components (charts, tables, stats, etc.) that delivers precise, actionable insights directly tied to the data. Your JSON must match ApexCharts' expected structure, using the provided examples as a guide, and must include all relevant components.
+
+User Prompt: "${prompt}"
+
+Available Data: ${JSON.stringify(data, null, 2)}
+
+Instructions:
+1. Analyze the provided raw data and the user's prompt to determine how to best aggregate, group, and process the data. Consider:
+   - Grouping or aggregating data by relevant categorical fields (e.g., "department", "Line") to reveal trends.
+   - Computing sums, averages, or other relevant statistics from numeric fields.
+   - Preserving detailed individual records when granularity is critical.
+   - Highlighting trends, outliers, and performance gaps.
+
+2. When encountering duplicate fields (e.g., multiple "SKU Information" entries for the same "Line"):
+   - Treat each as distinct, and include distinguishing information (like "SKU Information") in labels or descriptions.
+
+3. Explore the entire dataset and prioritize fields that drive decision-making (e.g., production output, efficiency metrics, downtime).
+
+4. Design a dashboard that includes at least 3-5 components. The components must be diverse and directly reflect the data:
+   - Use bar charts for comparing numerical values across categories.
+   - Use column charts for multi-series comparisons over categories.
+   - Use pie charts for proportions (ensuring only non-zero values are included).
+   - Use line charts for trends if there is a time-based or sequential field.
+   - Use area charts when a filled trend visualization is more appropriate.
+   - Use scatter charts for visualizing correlations between two numerical fields.
+   - Use radar charts for comparing multiple performance metrics.
+   - Use heatmap charts to show intensity across two dimensions (e.g., time vs category).
+   - If a specific chart type cannot be generated meaningfully, substitute it with a table or stat component summarizing the data.
+
+5. Ensure chart data integrity:
+   - Only include non-zero values.
+   - Use explicit, clear labels mapped directly from field names (e.g., "Unbooked Minor Downtime" instead of "series-1").
+   - For pie charts, ensure categories are meaningful and paired with their non-zero values.
+   - The "series" field must be a top-level property within "chartConfig", separate from "options".
+
+6. Do not include any generic placeholders, dummy data, or JavaScript functions in the JSON. If a formatter is needed, include it as a string (e.g., "function(val) { return val + ' %'; }") following the correct ApexCharts parameters, but only when explicitly required.
+
+7. The final JSON configuration must be error-free and structured as follows (each component must reflect real data from the provided dataset and prompt):
+
+{
+  "title": "Dashboard Title",
+  "description": "Dashboard description",
+  "layout": "grid",
+  "components": [
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "line",
+        "title": "Product Trends by Month",
+        "description": "Line chart showing product trends over months",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "bar",
+        "title": "Sales by Country",
+        "description": "Horizontal bar chart showing sales by country",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "bar",
+        "title": "Financial Metrics by Month",
+        "description": "Column chart showing financial metrics over months",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "pie",
+        "title": "Team Contributions",
+        "description": "Pie chart showing team contributions",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "area",
+        "title": "Stock Price Movements",
+        "description": "Area chart showing stock price trends over time",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "scatter",
+        "title": "Sample Data Scatter",
+        "description": "Scatter chart showing sample data points",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "radar",
+        "title": "Performance Metrics by Category",
+        "description": "Radar chart comparing performance metrics across categories",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "chart",
+      "gridSize": 6,
+      "chartConfig": {
+        "type": "heatmap",
+        "title": "Activity Heatmap by Day and Hour",
+        "description": "Heatmap showing activity intensity across days and hours",
+        "height": 350,
+        "series": [ ... ],
+        "options": { ... }
+      }
+    },
+    {
+      "type": "table",
+      "gridSize": 6,
+      "tableConfig": {
+        "title": "Data Summary Table",
+        "description": "Table summarizing key data points",
+        "dense": true,
+        "columns": [ ... ],
+        "data": [ ... ]
+      }
+    },
+    {
+      "type": "stat",
+      "gridSize": 3,
+      "statConfig": {
+        "title": "Key Metric",
+        "value": "Value",
+        "change": 12.5,
+        "period": "vs last period"
+      }
+    }
+  ]
+}
+
+Ensure your output JSON directly reflects the input data and user prompt—do not include any dummy values or generic labels. Replace all placeholder text with accurate, data-driven labels, values, and chart configurations based on the provided raw data and prompt.
+
+Respond with ONLY the complete valid JSON configuration.
+`;
+
 		// const llmPrompt = `
 		// 	You are a dashboard design expert with advanced data analysis skills. Based on the following prompt and raw data, create a JSON configuration for a dynamic dashboard with multiple components. Your goal is to provide meaningful insights by analyzing the data and determining the best way to process it (e.g., aggregating, grouping, or leaving it as is) based on the user's intent and the data's structure.
 
@@ -1844,7 +2022,7 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 		// 	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data, placeholders, or generic labels allowed.
 		// `;
 
-		const { data } = sampleData;
+		// const { data } = sampleData;
 		let formattedData = '';
 		if (Array.isArray(data) && data.length > 0) {
 			const headers = Object.keys(data[0]);
@@ -1854,7 +2032,7 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 			formattedData = 'No data available.';
 		}
 
-		// const llmPrompt = `
+		// const llmPrompt = `zz
 		// 	You are an expert in dashboard design and data analysis, tasked with creating a highly accurate, actionable, and visually diverse dashboard configuration for a critical production environment. Based on the user's prompt and the provided raw data, generate a JSON configuration for a dashboard with multiple components (charts, tables, stats) that delivers precise, error-free insights tailored to the user's intent.
 
 		// 	User Prompt: "${prompt}"
@@ -1945,12 +2123,13 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 		// 	The dashboard must be precise, actionable, visually diverse, and directly tied to the input data and prompt—no dummy data, placeholders, generic labels, or direct JavaScript functions allowed.
 		// `;
 
-		const initialMessages = [{ role: 'user', content: llmPrompt }];
+		const initialMessages = [{ role: 'user', content: llmPrompt2 }];
 		const userMessage = { role: 'user', content: `${prompt}` };
 
 		// Use generateText (non-streaming) for Config Mode
 		const response = await generateText({
-			model: google('gemini-2.5-pro-exp-03-25'),
+			// model: google('gemini-2.5-pro-exp-03-25'),
+			model: google('gemini-2.0-flash-001'),
 			messages: [...initialMessages, userMessage],
 		});
 
@@ -1988,7 +2167,7 @@ Available Data: ${JSON.stringify(sampleData, null, 2)}
 		// 	.replace(/```/g, '')
 		// 	.trim();
 
-		return c.json({ success: true, data: sampleData, dashboardConfig, prompt });
+		return c.json({ success: true, data: data, dashboardConfig, prompt });
 	} catch (error) {
 		console.error('Error in /mrt-chart:', error);
 		return c.text('Failed to process the request', 500);
